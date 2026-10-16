@@ -32,12 +32,21 @@
       return { key: "p.praise." + i, text: D.PHRASES.praise[i] };
     },
     letter: (ch) => ({ key: "letter." + ch, text: D.LETTER[ch].name }),
-    syl: (ch) => ({ key: "syl." + ch, text: D.SYL_A[ch] }),
+    syl: (ch, sound) => ({ key: `syl.${ch}.${sound}`, text: D.syllableSpoken(ch, sound) }),
+    nq: (id) => ({ key: "nq." + id, text: D.NQ[id].name }),
+    // Any written syllable: a plain letter+vowel uses its syllable recording.
+    part(text) {
+      const p = D.parseWord(text);
+      if (p.letters.length === 1 && p.niqqud.length === 1 && D.syllableText(p.letters[0], p.niqqud[0]) === text) {
+        return seg.syl(p.letters[0], D.NQ[p.niqqud[0]].sound);
+      }
+      return { key: "part." + text, text };
+    },
     word: (w) => ({ key: "word." + w.w, text: w.w }),
     name: () => ({ key: null, text: (S.profile() || {}).name || "" }),
   };
   function itemSeg(info) {
-    return info.kind === "S" ? seg.syl(info.ch) : seg.letter(info.ch);
+    return info.kind === "S" ? seg.syl(info.ch, info.sound) : seg.letter(info.ch);
   }
 
   // ---------- Guide character ----------
@@ -224,7 +233,7 @@
       started: Date.now(),
       requeued: new Set(),
       newStickers: [],
-      total: tasks.filter((t) => t.type !== "intro").length,
+      total: tasks.filter((t) => !t.type.startsWith("intro")).length,
       doneCount: 0,
     };
     runTask();
@@ -271,13 +280,26 @@
   function runTask() {
     if (!session) return;
     const overTime = Date.now() - session.started > SESSION_MAX_MS;
-    if (session.i >= session.tasks.length || (overTime && session.tasks[session.i].type !== "intro")) {
+    if (session.i >= session.tasks.length || (overTime && !session.tasks[session.i].type.startsWith("intro"))) {
       endSession();
       return;
     }
     const task = session.tasks[session.i];
     const info = S.itemInfo(task.id);
-    const run = { intro: introTask, hear: hearTask, hearSyl: hearTask, opening: soundTask, closing: soundTask, trace: traceTask }[task.type];
+    const run = {
+      intro: introTask,
+      introNq: introNqTask,
+      hear: hearTask,
+      hearSyl: hearTask,
+      opening: soundTask,
+      closing: soundTask,
+      trace: traceTask,
+      wheel: wheelTask,
+      similar: similarTask,
+      wordpic: wordPicTask,
+      missing: missingTask,
+      build: buildTask,
+    }[task.type];
     run(task, info);
   }
 
@@ -286,6 +308,8 @@
     const p = session.p;
     if (task.type === "intro") {
       S.markIntroduced(p, task.id);
+    } else if (task.type === "introNq") {
+      S.markIntroduced(p, "N:" + S.itemInfo(task.id).niqqud);
     } else {
       session.doneCount++;
       const mastered = S.record(p, task.id, task.type, firstTry, session.no);
@@ -357,16 +381,45 @@
     talk([seg.p("newLetter")]).then(() => document.body.contains($("#letter")) && say());
   }
 
+  // ---------- Exercise: meet a new niqqud mark ----------
+  function introNqTask(task, info) {
+    const v = sessionShell(
+      `<div class="intro">
+        <button class="big-letter syl" id="letter">${info.display}</button>
+      </div>
+      <button class="next-btn" id="next" aria-label="הלאה">${ICON.next}</button>`,
+      "intro-stage"
+    );
+    const say = () => talk([seg.p("thisIs"), seg.nq(info.niqqud), seg.p("like"), itemSeg(info)]);
+    v.replay = say;
+    on("#letter", "click", say);
+    on("#next", "click", () => {
+      A.sfx.tap();
+      finishTask(task, true);
+    });
+    talk([seg.p("newMark")]).then(() => document.body.contains($("#letter")) && say());
+  }
+
   // ---------- Exercise: choose one of three ----------
-  // opts: { prompt: [segments], answer, choices, onWrong1(chosen), onReveal(), visual }
+  // opts: { prompt: [segments], answer, choices (strings or {v, label}), onWrong1(chosen),
+  //         onReveal(), visual, intro() — runs before the prompt, afterRight() }
   function choiceTask(task, opts) {
     const cards = opts.choices
-      .map((c) => `<button class="card" data-v="${esc(c)}"><span>${c}</span></button>`)
+      .map((c) => (typeof c === "string" ? { v: c, label: c } : c))
+      .map((c) => `<button class="card" data-v="${esc(c.v)}"><span>${c.label}</span></button>`)
       .join("");
-    const v = sessionShell(`${opts.visual || ""}<div class="choices">${cards}</div>`, opts.stageClass);
+    const v = sessionShell(`${opts.visual || ""}<div class="choices ${opts.choicesClass || ""}">${cards}</div>`, opts.stageClass);
     let attempts = 0;
     let locked = false;
-    v.replay = () => talk(opts.prompt);
+    const ask = async () => {
+      if (opts.intro) {
+        locked = true;
+        await opts.intro();
+        locked = false;
+      }
+      return talk(opts.prompt);
+    };
+    v.replay = ask;
     $$(".card").forEach((btn) =>
       btn.addEventListener("click", async () => {
         if (locked || btn.disabled) return;
@@ -375,7 +428,8 @@
           locked = true;
           btn.classList.add("right");
           A.sfx.correct();
-          if (attempts === 0 && Math.random() < 0.4) await talk([seg.praise()]);
+          if (opts.afterRight) await opts.afterRight();
+          else if (attempts === 0 && Math.random() < 0.4) await talk([seg.praise()]);
           else await wait(750);
           finishTask(task, attempts === 0);
           return;
@@ -400,7 +454,7 @@
         }
       })
     );
-    talk(opts.prompt);
+    ask();
   }
 
   function hearTask(task, info) {
@@ -409,10 +463,7 @@
     const answer = info.display;
     const choices = S.choicesFor(p, task);
     const target = itemSeg(info);
-    const chosenSeg = (val) => {
-      if (!isSyl) return seg.letter(val);
-      return seg.syl([...val][0]);
-    };
+    const chosenSeg = (val) => (isSyl ? seg.part(val) : seg.letter(val));
     choiceTask(task, {
       stageClass: "hear-stage" + (isSyl ? " syl" : ""),
       visual: `<div class="ear-guide">${GUIDE}</div>`,
@@ -447,6 +498,169 @@
       onWrong1: (val) => [seg.p("thisIsLetter"), seg.letter(val), seg.p("listenAgain"), seg.word(w)],
       onReveal: () => [seg.word(w), seg.p(opening ? "startsWith" : "endsWith"), seg.letter(info.base)],
     });
+  }
+
+  // ---------- Exercise: syllable wheel ----------
+  // A row where only the letter or only the vowel changes. The guide reads the
+  // row, lighting each syllable, then asks for one of them.
+  function wheelTask(task, info) {
+    const rows = S.wheelRows(session.p, info);
+    const row = pickOne(rows);
+    const target = itemSeg(info);
+    choiceTask(task, {
+      stageClass: "hear-stage syl",
+      choicesClass: "four",
+      visual: `<div class="ear-guide">${GUIDE}</div>`,
+      choices: row.slice().sort(() => Math.random() - 0.5),
+      answer: info.display,
+      async intro() {
+        await talk([seg.p("listen")]);
+        // Read in reading order: right to left.
+        for (const card of $$(".card")) {
+          if (!card.isConnected) return;
+          card.classList.add("lit");
+          await talk([seg.part(card.dataset.v)]);
+          card.classList.remove("lit");
+        }
+        await wait(250);
+      },
+      prompt: [seg.p("where"), target],
+      onWrong1: (val) => [seg.p("thisIs"), seg.part(val), seg.p("weLookForSyl"), target],
+      onReveal: () => [seg.p("thisIs"), target],
+    });
+  }
+
+  // ---------- Exercise: telling similar letters apart ----------
+  // Only for letters this child has mixed up repeatedly.
+  function similarTask(task, info) {
+    const p = session.p;
+    const partner = S.similarPartner(p, info.ch) || D.lookAlikes(info.ch)[0];
+    const target = seg.letter(info.ch);
+    choiceTask(task, {
+      stageClass: "hear-stage similar",
+      visual: `<div class="ear-guide">${GUIDE}</div>`,
+      choices: S.choicesFor(p, { id: task.id, type: "similar", partner }),
+      answer: info.ch,
+      prompt: [seg.p("whereLetter"), target],
+      onConfuse: (val) => S.recordConfusion(p, info.ch, val),
+      onWrong1: (val) => [seg.p("thisIsLetter"), seg.letter(val), seg.p("weLookFor"), target],
+      onReveal: () => [seg.p("thisIsLetter"), target, seg.p("laterAgain")],
+      // Name both, side by side, so the contrast sticks.
+      async afterRight() {
+        const other = $$(".card").find((c) => c.dataset.v !== info.ch);
+        await talk([seg.p("thisIsLetter"), target]);
+        other && other.classList.add("lit");
+        await talk([seg.p("andThisLetter"), seg.letter(partner)]);
+      },
+    });
+  }
+
+  // ---------- Exercise: word and picture ----------
+  // Reading with understanding: the word is not read aloud until the child answers.
+  function wordPicTask(task, info) {
+    const w = info.word;
+    const pics = S.pictureChoices(w);
+    choiceTask(task, {
+      stageClass: "word-stage",
+      choicesClass: "pics",
+      visual: `<div class="big-word">${w.w}</div>`,
+      choices: pics.map((x) => ({ v: x.w, label: x.e })),
+      answer: w.w,
+      prompt: [seg.p("wordPic")],
+      onWrong1: (val) => [seg.p("thisIs"), seg.word(D.WORDS.find((x) => x.w === val)), seg.p("wordPic")],
+      onReveal: () => [seg.p("written"), seg.word(w)],
+      afterRight: () => talk([seg.word(w)]),
+    });
+  }
+
+  // ---------- Exercise: what's missing? ----------
+  function missingTask(task, info) {
+    const w = info.word;
+    const parts = w.parsed.syllables;
+    const idx = Math.floor(Math.random() * parts.length);
+    const shown = parts.map((x, i) => (i === idx ? `<span class="blank">?</span>` : `<span>${x}</span>`)).join("");
+    choiceTask(task, {
+      stageClass: "word-stage",
+      visual: `<div class="picture small"><div class="pic">${w.e}</div></div><div class="big-word parts" id="word">${shown}</div>`,
+      choices: S.missingChoices(session.p, w, idx),
+      answer: parts[idx],
+      prompt: [seg.p("missing"), seg.word(w)],
+      onWrong1: (val) => [seg.p("thisIs"), seg.part(val), seg.p("listenAgain"), seg.word(w)],
+      onReveal: () => [seg.word(w)],
+      async afterRight() {
+        const blank = $(".blank");
+        if (blank) {
+          blank.textContent = parts[idx];
+          blank.classList.add("filled");
+        }
+        await talk([seg.word(w)]);
+      },
+    });
+  }
+
+  // ---------- Exercise: build a word ----------
+  // Tap the syllables in reading order to put the word together.
+  function buildTask(task, info) {
+    const w = info.word;
+    const parts = w.parsed.syllables;
+    let order = parts.map((_, i) => i);
+    while (order.every((x, i) => x === i)) order = order.sort(() => Math.random() - 0.5);
+    const slots = parts.map((_, i) => `<span class="slot" data-i="${i}"></span>`).join("");
+    const tiles = order.map((i) => `<button class="tile" data-i="${i}">${parts[i]}</button>`).join("");
+    const v = sessionShell(
+      `<div class="picture small"><div class="pic">${w.e}</div></div>
+       <div class="slots">${slots}</div>
+       <div class="tiles">${tiles}</div>`,
+      "word-stage build-stage"
+    );
+    const prompt = [seg.p("build"), seg.word(w)];
+    let next = 0;
+    let mistakes = 0;
+    let locked = false;
+    v.replay = () => talk(prompt);
+    $$(".tile").forEach((tile) =>
+      tile.addEventListener("click", async () => {
+        if (locked || tile.disabled) return;
+        const i = +tile.dataset.i;
+        // Same-looking syllables are interchangeable.
+        if (parts[i] === parts[next]) {
+          tile.disabled = true;
+          tile.classList.add("used");
+          $$(".tile").forEach((t) => t.classList.remove("reveal"));
+          const slot = $(`.slot[data-i="${next}"]`);
+          slot.textContent = parts[i];
+          slot.classList.add("filled");
+          next++;
+          A.sfx.tap();
+          if (next === parts.length) {
+            locked = true;
+            A.sfx.correct();
+            $(".slots").classList.add("done");
+            await talk([seg.word(w)]);
+            await wait(500);
+            finishTask(task, mistakes === 0);
+          } else {
+            talk([seg.part(parts[i])]);
+          }
+          return;
+        }
+        mistakes++;
+        A.sfx.soft();
+        tile.classList.remove("wiggle");
+        void tile.offsetWidth;
+        tile.classList.add("wiggle");
+        locked = true;
+        if (mistakes === 1) {
+          await talk([seg.p("thisIs"), seg.part(parts[i]), seg.p("listenAgain"), seg.word(w)]);
+        } else {
+          const right = $$(".tile").find((t) => !t.disabled && parts[+t.dataset.i] === parts[next]);
+          right && right.classList.add("reveal");
+          await talk([seg.part(parts[next])]);
+        }
+        locked = false;
+      })
+    );
+    talk(prompt);
   }
 
   // ---------- Exercise: tracing ----------
@@ -532,10 +746,9 @@
       const st = S.letterStatus(p, l.ch);
       return `<div class="map-cell ${st}" title="${l.name} — ${statusLabel[st]}">${l.ch}</div>`;
     }).join("");
-    const nq = D.NIQQUD.filter((n) => n.v1)
-      .map((n) => {
+    const nq = D.NIQQUD.map((n) => {
         const s = S.niqqudStatus(p, n.id);
-        const sample = "בּ" + n.mark;
+        const sample = D.syllableText("ב", n.id);
         const detail = s.status === "off" ? statusLabel.off : `${s.mastered} מתוך ${s.total} צירופים נלמדו`;
         return `<div class="nq-row"><div class="map-cell ${s.status}">${sample}</div><div><b>${n.name}</b><br><span class="muted">${detail}</span></div></div>`;
       })
@@ -565,6 +778,7 @@
           <div class="stats">
             <div><b>${S.minutesThisWeek(p)}</b><span>דקות תרגול השבוע</span></div>
             <div><b>${p.stickers.length}</b><span>אותיות שנלמדו</span></div>
+            <div><b>${S.readableWords(p).filter((w) => S.isMastered(p, "W:" + w.w)).length}</b><span>מילים שנקראו</span></div>
             <div><b>${p.sessions}</b><span>מפגשים</span></div>
           </div>
         </section>
@@ -634,8 +848,20 @@
   function voiceCheck() {
     const rows = [];
     D.LETTERS.forEach((l) => rows.push({ label: `${l.ch} — ${l.name}`, segs: [seg.letter(l.ch)] }));
-    Object.keys(D.SYL_A).forEach((ch) => rows.push({ label: `${D.syllableText(ch, "kamatz")} / ${D.syllableText(ch, "patach")}`, segs: [seg.syl(ch)] }));
+    D.NIQQUD.forEach((n) => rows.push({ label: `${D.syllableText("ב", n.id)} — ${n.name}`, segs: [seg.nq(n.id)] }));
+    // One row per sound; marks that sound the same share a recording.
+    const sounds = [];
+    D.NIQQUD.forEach((n) => !sounds.some((x) => x.sound === n.sound) && sounds.push(n));
+    sounds.forEach((n) =>
+      D.LETTERS.filter((l) => D.syllableAllowed(l.ch, n.id)).forEach((l) => {
+        const same = D.NIQQUD.filter((m) => m.sound === n.sound && D.syllableAllowed(l.ch, m.id)).map((m) => D.syllableText(l.ch, m.id));
+        rows.push({ label: same.join(" / "), segs: [seg.syl(l.ch, n.sound)] });
+      })
+    );
     D.WORDS.forEach((w) => rows.push({ label: `${w.e} ${w.w}`, segs: [seg.word(w)] }));
+    const parts = new Set();
+    D.WORDS.forEach((w) => w.parsed.ok && w.parsed.syllables.forEach((x) => parts.add(x)));
+    [...parts].map((x) => seg.part(x)).filter((g) => g.key.startsWith("part.")).forEach((g) => rows.push({ label: g.text, segs: [g] }));
     Object.keys(D.PHRASES).forEach((k) => {
       const v = D.PHRASES[k];
       if (Array.isArray(v)) v.forEach((t, i) => rows.push({ label: t, segs: [{ key: `p.${k}.${i}`, text: t }] }));
@@ -662,8 +888,8 @@
     const finals = D.LETTERS.filter((l) => l.finalOf);
     const nq = D.NIQQUD.map(
       (n) =>
-        `<button type="button" class="toggle nq ${p.niqqud.includes(n.id) ? "on" : ""}" data-nq="${n.id}" ${n.v1 ? "" : "disabled"} aria-pressed="${p.niqqud.includes(n.id)}">
-          <span class="nq-sample">בּ${n.mark}</span><span>${n.name}</span></button>`
+        `<button type="button" class="toggle nq ${p.niqqud.includes(n.id) ? "on" : ""}" data-nq="${n.id}" aria-pressed="${p.niqqud.includes(n.id)}">
+          <span class="nq-sample">${D.syllableText("ב", n.id)}</span><span>${n.name}</span></button>`
     ).join("");
     show(
       `<div class="parent-page form">
@@ -688,7 +914,7 @@
         </div>
         <div class="field"><span>אילו סימני ניקוד נלמדו?</span>
           <div class="toggles nq-toggles">${nq}</div>
-          <p class="muted">בגרסה הזו: קמץ ופתח. שאר הסימנים יגיעו בגרסה הבאה.</p>
+          <p class="muted">מילים לקריאה מופיעות רק כשכל האותיות וסימני הניקוד שלהן סומנו כאן.</p>
         </div>
         <label class="field"><span>מהירות הקול</span>
           <div class="rate-row"><input id="rate" type="range" min="0.6" max="1.1" step="0.05" value="${p.rate}"><button type="button" class="icon-btn" id="try" aria-label="דוגמה">${ICON.speaker}</button></div>

@@ -76,33 +76,50 @@
   }
 
   // ---------- Niqqud ----------
-  // Version 1 teaches kamatz and patach; the rest are listed so the parent
-  // profile already has a place for them.
+  // In the order the Ministry programme teaches them. `sound` groups marks
+  // that sound the same (kamatz/patach, segol/tsere, shuruk/kubutz).
   const NIQQUD = [
-    { id: "kamatz", mark: "ָ", name: "קָמַץ", v1: true },
-    { id: "patach", mark: "ַ", name: "פַּתָּח", v1: true },
-    { id: "hiriq", mark: "ִ", name: "חִירִיק", v1: false },
-    { id: "holam", mark: "ֹ", name: "חוֹלָם", v1: false },
-    { id: "segol", mark: "ֶ", name: "סֶגּוֹל", v1: false },
-    { id: "tsere", mark: "ֵ", name: "צֵירֵה", v1: false },
-    { id: "shuruk", mark: "ּ", name: "שׁוּרוּק", v1: false },
+    { id: "kamatz", mark: "\u05B8", name: "קָמַץ", sound: "a" },
+    { id: "patach", mark: "\u05B7", name: "פַּתָּח", sound: "a" },
+    { id: "hiriq", mark: "\u05B4", name: "חִירִיק", sound: "i" },
+    { id: "holam", mark: "\u05B9", name: "חוֹלָם", sound: "o" },
+    { id: "segol", mark: "\u05B6", name: "סֶגּוֹל", sound: "e" },
+    { id: "tsere", mark: "\u05B5", name: "צֵירֵה", sound: "e" },
+    { id: "shuruk", mark: "\u05BC", name: "שׁוּרוּק", sound: "u" },
+    { id: "kubutz", mark: "\u05BB", name: "קֻבּוּץ", sound: "u" },
   ];
-  const DAGESH = "ּ";
-  const SHIN_DOT = "ׁ";
+  const NQ = Object.fromEntries(NIQQUD.map((n) => [n.id, n]));
+  const DAGESH = "\u05BC";
+  const SHIN_DOT = "\u05C1";
 
-  // Spoken form of consonant + "a" (kamatz and patach sound the same).
-  const SYL_A = {
-    א: "אָה", ב: "בָּה", ג: "גָּה", ד: "דָּה", ה: "הָה", ו: "וָה", ז: "זָה",
-    ח: "חָה", ט: "טָה", י: "יָה", כ: "כָּה", ל: "לָה", מ: "מָה", נ: "נָה",
-    ס: "סָה", ע: "עָה", פ: "פָּה", צ: "צָה", ק: "קָה", ר: "רָה", ש: "שָׁה", ת: "תָּה",
-  };
+  // The consonant as written at the start of a syllable.
+  function onset(ch) {
+    let c = ch;
+    if ("בכפ".includes(ch)) c += DAGESH; // bet/kaf/pe with dagesh
+    if (ch === "ש") c += SHIN_DOT;
+    return c;
+  }
 
+  // Letter + niqqud as the child sees it. Holam and shuruk are written with vav.
   function syllableText(ch, niqqudId) {
-    const n = NIQQUD.find((x) => x.id === niqqudId);
-    let base = ch;
-    if ("בכפ".includes(ch)) base += DAGESH; // start-of-syllable: bet/kaf/pe with dagesh
-    if (ch === "ש") base += SHIN_DOT;
-    return base + n.mark;
+    const c = onset(ch);
+    if (niqqudId === "holam") return c + "ו\u05B9";
+    if (niqqudId === "shuruk") return c + "ו" + DAGESH;
+    return c + NQ[niqqudId].mark;
+  }
+
+  // Letters that don't form a sensible open syllable with a vowel.
+  function syllableAllowed(ch, niqqudId) {
+    if (LETTER[ch].finalOf) return false;
+    if (ch === "ו" && (niqqudId === "holam" || niqqudId === "shuruk")) return false;
+    return true;
+  }
+
+  // What the device voice reads for consonant + vowel sound. Spelled so an
+  // engine that ignores niqqud still has a fair chance (recordings replace it).
+  const VOWEL_SPELL = { a: "\u05B8ה", i: "\u05B4י", o: "וֹ", e: "\u05B6ה", u: "וּ" };
+  function syllableSpoken(ch, sound) {
+    return onset(ch) + VOWEL_SPELL[sound];
   }
 
   // ---------- Words ----------
@@ -175,8 +192,83 @@
     { w: "תּוּת", e: "🍓", first: "ת", last: "ת" },
     { w: "תַּפּוּחַ", e: "🍎", first: "ת", last: null },
     { w: "תַּרְנְגוֹל", e: "🐓", first: "ת", last: "ל" },
+    // Short words with simple niqqud, so word practice can start early.
+    { w: "עָנָן", e: "☁️", first: "ע", last: "נ" },
+    { w: "פָּרָה", e: "🐄", first: "פ", last: null },
+    { w: "סַל", e: "🧺", first: "ס", last: "ל" },
+    { w: "כַּף", e: "🥄", first: "כ", last: null },
+    { w: "מַגָּף", e: "👢", first: "מ", last: null },
+    { w: "אַבָּא", e: "👨", first: "א", last: null },
+    { w: "שָׁפָן", e: "🐇", first: "ש", last: "נ" },
+    { w: "סִירָה", e: "⛵", first: "ס", last: null },
+    { w: "גֶּשֶׁם", e: "🌧️", first: "ג", last: "מ" },
+    { w: "מִטָּה", e: "🛏️", first: "מ", last: null },
+    { w: "בּוּבָּה", e: "🪆", first: "ב", last: null },
+    { w: "גִּיטָרָה", e: "🎸", first: "ג", last: null },
   ];
   WORDS.forEach((w, i) => (w.id = "w" + i));
+
+  // ---------- Reading a vocalized word ----------
+  // Splits a word into syllables and lists the letters and niqqud a child
+  // must know to read it. Words with marks the programme hasn't reached
+  // (shva, hataf, kamatz katan) or with a patach genuva are not used for
+  // syllable work.
+  const MARK_NQ = { "\u05B8": "kamatz", "\u05B7": "patach", "\u05B4": "hiriq", "\u05B9": "holam", "\u05B6": "segol", "\u05B5": "tsere", "\u05BB": "kubutz" };
+  const UNSUPPORTED = /[\u05B0-\u05B3\u05C7]/;
+  const isMark = (c) => c >= "\u0591" && c <= "\u05C7" && c !== "\u05BE" && c !== "\u05C0" && c !== "\u05C3" && c !== "\u05C6";
+
+  function parseWord(word) {
+    const clusters = [];
+    for (const c of word) {
+      if (isMark(c) && clusters.length) clusters[clusters.length - 1].text += c;
+      else clusters.push({ text: c, base: c });
+    }
+    const out = { syllables: [], niqqud: new Set(), letters: new Set(), ok: !UNSUPPORTED.test(word), genuva: false };
+    let cur = null;
+    clusters.forEach((cl, i) => {
+      const marks = cl.text.slice(1);
+      const prev = clusters[i - 1];
+      const prevHasVowel = prev && prev.vowel;
+      let vowel = null;
+      for (const m of marks) if (MARK_NQ[m]) vowel = MARK_NQ[m];
+      // Vav carrying a holam dot or a shuruk dagesh after a vowel-less letter is the vowel itself.
+      if (cl.base === "ו" && prev && !prevHasVowel && (marks === "\u05B9" || marks === "\u05BC")) {
+        prev.vowel = marks === "\u05B9" ? "holam" : "shuruk";
+        out.niqqud.add(prev.vowel);
+        cur.text += cl.text;
+        cl.mater = true;
+        return;
+      }
+      // Silent letters closing an open vowel: yod after i/e, he or alef at the end.
+      const silent = !marks && prevHasVowel && ((cl.base === "י" && /hiriq|tsere|segol/.test(prev.vowel)) || ((cl.base === "ה" || cl.base === "א") && i === clusters.length - 1));
+      if (silent) {
+        if (cl.base !== "י") out.letters.add(cl.base);
+        cur.text += cl.text;
+        cl.mater = true;
+        return;
+      }
+      out.letters.add(cl.base);
+      if (vowel || (clusters[i + 1] && clusters[i + 1].base === "ו" && /^(\u05B9|\u05BC)$/.test(clusters[i + 1].text.slice(1)) && !vowel)) {
+        // Patach under a final ח/ע after an open vowel is read before the consonant.
+        if (i === clusters.length - 1 && vowel === "patach" && "חע".includes(cl.base) && cur && !cur.closed) out.genuva = true;
+        cl.vowel = vowel;
+        if (vowel) out.niqqud.add(vowel);
+        cur = { text: cl.text };
+        out.syllables.push(cur);
+      } else if (cur) {
+        cur.text += cl.text;
+        cur.closed = true;
+      } else {
+        out.ok = false; // starts with a vowel-less letter
+      }
+    });
+    out.syllables = out.syllables.map((x) => x.text);
+    if (out.genuva) out.ok = false;
+    out.niqqud = [...out.niqqud];
+    out.letters = [...out.letters];
+    return out;
+  }
+  WORDS.forEach((w) => Object.assign(w, { parsed: parseWord(w.w) }));
 
   // The sticker for each letter is the picture of its first word.
   function stickerFor(ch) {
@@ -300,6 +392,13 @@
     done: "סִיַּמְנוּ לְהַיּוֹם!",
     wellDone: "כׇּל הַכָּבוֹד",
     newSticker: { m: "קִבַּלְתָּ מַדְבֵּקָה חֲדָשָׁה!", f: "קִבַּלְתְּ מַדְבֵּקָה חֲדָשָׁה!" },
+    listen: { m: "תַּקְשִׁיב", f: "תַּקְשִׁיבִי" },
+    build: { m: "בְּנֵה אֶת הַמִּלָּה", f: "בְּנִי אֶת הַמִּלָּה" },
+    missing: "מָה חָסֵר בַּמִּלָּה",
+    wordPic: { m: "קְרָא אֶת הַמִּלָּה, וּבְחַר אֶת הַתְּמוּנָה", f: "קִרְאִי אֶת הַמִּלָּה, וּבַחֲרִי אֶת הַתְּמוּנָה" },
+    written: "כָּתוּב",
+    andThisLetter: "וְזוֹ הָאוֹת",
+    newMark: { m: "יֵשׁ לְךָ סִימָן נִקּוּד חָדָשׁ!", f: "יֵשׁ לָךְ סִימָן נִקּוּד חָדָשׁ!" },
     noStickersYet: "הַמַּדְבֵּקוֹת יַגִּיעוּ כְּשֶׁתִּלְמְדוּ אוֹתִיּוֹת",
   };
 
@@ -311,7 +410,10 @@
     LETTERS,
     LETTER,
     NIQQUD,
-    SYL_A,
+    NQ,
+    syllableSpoken,
+    syllableAllowed,
+    parseWord,
     WORDS,
     STROKES,
     PHRASES,

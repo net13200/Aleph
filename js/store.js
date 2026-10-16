@@ -10,7 +10,8 @@
   const KEY = "aleph.v1";
   const MASTERY_STREAK = 3; // correct in a row...
   const MASTERY_SESSIONS = 2; // ...spread over at least this many sessions
-  const ACTIVE_NEW_LIMIT = 5; // how many not-yet-mastered items practise at once
+  // How many not-yet-mastered items of each kind practise at once.
+  const ACTIVE_NEW_LIMIT = { L: 4, S: 6, W: 4 };
   const SESSION_TASKS = 10;
 
   let state = load();
@@ -78,13 +79,17 @@
       const l = D.LETTER[ch];
       return { id, kind, ch, base: l.finalOf || ch, isFinal: !!l.finalOf, name: l.name, display: ch };
     }
+    if (kind === "W") {
+      const word = D.WORDS.find((w) => w.w === ch);
+      return { id, kind, word, display: word.w };
+    }
     return {
       id,
       kind,
       ch,
       base: ch,
       niqqud: nq,
-      name: D.SYL_A[ch],
+      sound: D.NQ[nq].sound,
       display: D.syllableText(ch, nq),
     };
   }
@@ -105,19 +110,27 @@
     const order = D.RECOMMENDED_ORDER.concat(["ך", "ם", "ן", "ף", "ץ"]);
     const letters = order.filter((ch) => p.letters.includes(ch));
     const items = letters.map((ch) => "L:" + ch);
-    D.NIQQUD.filter((n) => n.v1 && p.niqqud.includes(n.id)).forEach((n) => {
+    D.NIQQUD.filter((n) => p.niqqud.includes(n.id)).forEach((n) => {
       letters.forEach((ch) => {
-        if (!D.LETTER[ch].finalOf) items.push(`S:${ch}:${n.id}`);
+        if (D.syllableAllowed(ch, n.id)) items.push(`S:${ch}:${n.id}`);
       });
     });
+    readableWords(p).forEach((w) => items.push("W:" + w.w));
     return items;
+  }
+
+  // Words whose every letter and niqqud mark the child has learned in class.
+  function readableWords(p) {
+    return D.WORDS.filter(
+      (w) => w.parsed.ok && w.parsed.letters.every((c) => p.letters.includes(c)) && w.parsed.niqqud.every((n) => p.niqqud.includes(n))
+    );
   }
 
   // Mastered items plus a few new ones. A syllable opens only after its
   // letter is mastered; new material opens as older material is mastered.
   function activeItems(p) {
     const out = [];
-    let fresh = 0;
+    const fresh = { L: 0, S: 0, W: 0 };
     for (const id of candidateItems(p)) {
       if (isMastered(p, id)) {
         out.push(id);
@@ -125,9 +138,11 @@
       }
       const info = itemInfo(id);
       if (info.kind === "S" && !isMastered(p, "L:" + info.ch)) continue;
-      if (fresh < ACTIVE_NEW_LIMIT) {
+      // Words open once every letter in them is mastered.
+      if (info.kind === "W" && !info.word.parsed.letters.every((c) => isMastered(p, "L:" + c))) continue;
+      if (fresh[info.kind] < ACTIVE_NEW_LIMIT[info.kind]) {
         out.push(id);
-        fresh++;
+        fresh[info.kind]++;
       }
     }
     return out;
@@ -200,9 +215,17 @@
   // Exercise types an item can use with the letters this child knows.
   function typesFor(p, id) {
     const info = itemInfo(id);
-    if (info.kind === "S") return ["hearSyl"];
-    if (info.isFinal) return ["hear", "trace"];
+    if (info.kind === "S") return wheelRows(p, info).length ? ["hearSyl", "wheel"] : ["hearSyl"];
+    if (info.kind === "W") {
+      const n = info.word.parsed.syllables.length;
+      const types = ["wordpic"];
+      if (n >= 2 && n <= 3) types.push("build");
+      if (n >= 2) types.push("missing");
+      return types;
+    }
     const types = ["hear", "trace"];
+    if (similarPartner(p, info.ch)) types.push("similar");
+    if (info.isFinal) return types;
     const known = p.letters.filter((c) => !D.LETTER[c].finalOf);
     const canDistract = (target) => known.filter((c) => !D.soundsAlike(c, target)).length >= 2;
     if (D.WORDS.some((w) => w.first === info.base) && canDistract(info.base)) types.push("opening");
@@ -274,6 +297,12 @@
         introduced.add(t.id);
         out.push({ id: t.id, type: "intro" });
       }
+      // Likewise the first time a niqqud mark shows up.
+      const nqKey = info.kind === "S" && "N:" + info.niqqud;
+      if (nqKey && !(p.progress[nqKey] && p.progress[nqKey].introduced) && !introduced.has(nqKey)) {
+        introduced.add(nqKey);
+        out.push({ id: t.id, type: "introNq" });
+      }
       out.push(t);
     });
     return out;
@@ -285,14 +314,13 @@
     const answer = task.answer || info.display;
     let pool;
     if (info.kind === "S") {
-      pool = p.letters
-        .filter((c) => !D.LETTER[c].finalOf && c !== info.ch && !D.soundsAlike(c, info.ch))
-        .map((c) => D.syllableText(c, info.niqqud));
-      if (pool.length < 2) {
-        pool = pool.concat(
-          D.RECOMMENDED_ORDER.filter((c) => c !== info.ch && !D.soundsAlike(c, info.ch)).map((c) => D.syllableText(c, info.niqqud))
-        );
-      }
+      // One option with the same letter and another vowel, one with another letter.
+      const vowelAlts = shuffle(otherVowels(p, info).map((n) => D.syllableText(info.ch, n)));
+      const letterAlts = shuffle(otherLetters(p, info));
+      if (letterAlts.length < 2) letterAlts.push(...shuffle(otherLetters({ letters: D.RECOMMENDED_ORDER }, info)));
+      pool = vowelAlts.slice(0, 1).concat(letterAlts.map((c) => D.syllableText(c, info.niqqud)));
+    } else if (task.type === "similar") {
+      return shuffle([info.ch, task.partner]);
     } else {
       const target = task.answer || info.ch;
       const hear = task.type === "hear";
@@ -308,6 +336,94 @@
     }
     const distractors = [...new Set(pool)].slice(0, 2);
     return shuffle([answer, ...distractors]);
+  }
+
+  // Learned niqqud marks with a different sound, one per sound.
+  function otherVowels(p, info) {
+    const seen = new Set([info.sound]);
+    const out = [];
+    D.NIQQUD.forEach((n) => {
+      if (p.niqqud.includes(n.id) && !seen.has(n.sound) && D.syllableAllowed(info.ch, n.id)) {
+        seen.add(n.sound);
+        out.push(n.id);
+      }
+    });
+    return out;
+  }
+
+  // Learned letters that sound different from this syllable's letter (and from each other).
+  function otherLetters(p, info) {
+    const out = [];
+    p.letters.forEach((c) => {
+      if (c === info.ch || !D.syllableAllowed(c, info.niqqud) || D.soundsAlike(c, info.ch)) return;
+      if (out.some((o) => D.soundsAlike(o, c))) return;
+      out.push(c);
+    });
+    return out;
+  }
+
+  // Syllable-wheel rows: only the letter changes, or only the vowel changes.
+  function wheelRows(p, info) {
+    const rows = [];
+    const letters = otherLetters(p, info);
+    if (letters.length >= 2) rows.push([info.ch].concat(shuffle(letters).slice(0, 3)).map((c) => D.syllableText(c, info.niqqud)));
+    const vowels = otherVowels(p, info);
+    if (vowels.length >= 2) rows.push([info.niqqud].concat(vowels.slice(0, 3)).map((n) => D.syllableText(info.ch, n)));
+    return rows;
+  }
+
+  // A letter this child keeps mixing up with a look-alike or sound-alike one.
+  function similarPartner(p, ch) {
+    let best = null;
+    Object.entries(p.confusions).forEach(([k, n]) => {
+      const [a, b] = k.split(">");
+      const other = a === ch ? b : b === ch ? a : null;
+      if (!other || n < 2 || !p.letters.includes(other) || !D.LETTER[other]) return;
+      if (!D.lookAlikes(ch).includes(other) && !D.soundsAlike(ch, other)) return;
+      if (!best || n > best.n) best = { ch: other, n };
+    });
+    return best && best.ch;
+  }
+
+  // Three pictures: the word's and two others.
+  function pictureChoices(word) {
+    const others = shuffle(D.WORDS.filter((w) => w.e !== word.e && w.first !== word.first)).slice(0, 2);
+    return shuffle([word].concat(others));
+  }
+
+  // What a syllable sounds like, so two options that sound the same never appear together.
+  const SOUND_CLASS = { ט: "ת", ע: "א", ה: "א", ק: "כּ", ח: "כ", ס: "שׂ", ו: "ב", ך: "כ", ם: "מ", ן: "נ", ף: "פ", ץ: "צ" };
+  function soundKey(syl) {
+    const p = D.parseWord(syl);
+    let key = "";
+    for (const c of syl) {
+      if (/[\u05D0-\u05EA]/.test(c)) key += SOUND_CLASS[c] || c;
+    }
+    return key.replace(/[יהא]$/, "") + "|" + p.niqqud.map((n) => D.NQ[n].sound).join("");
+  }
+
+  // Options for "what's missing?": the missing syllable and two that differ by one sound.
+  function missingChoices(p, word, idx) {
+    const answer = word.parsed.syllables[idx];
+    const parsed = D.parseWord(answer);
+    const ch = parsed.letters[0];
+    const nq = parsed.niqqud[0];
+    const cands = [];
+    if (ch && nq) {
+      otherVowels(p, { ch, sound: D.NQ[nq].sound }).forEach((n) => cands.push(D.syllableText(ch, n)));
+      otherLetters(p, { ch, niqqud: nq }).forEach((c) => cands.push(D.syllableText(c, nq)));
+    }
+    readableWords(p).forEach((w) => cands.push(...w.parsed.syllables));
+    const keys = new Set([soundKey(answer)]);
+    const picked = [];
+    for (const c of shuffle(cands.slice(0, 6)).concat(shuffle(cands.slice(6)))) {
+      const k = soundKey(c);
+      if (keys.has(k)) continue;
+      keys.add(k);
+      picked.push(c);
+      if (picked.length === 2) break;
+    }
+    return shuffle([answer].concat(picked));
   }
 
   // Letter status for the parent's map.
@@ -364,6 +480,11 @@
     candidateItems,
     planSession,
     choicesFor,
+    wheelRows,
+    similarPartner,
+    pictureChoices,
+    missingChoices,
+    readableWords,
     record,
     markIntroduced,
     recordConfusion,

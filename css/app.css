@@ -273,6 +273,7 @@ svg { display: block; }
 .where-mark i.on { background: var(--pink); }
 
 .intro { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.big-letter.syl { font-size: clamp(7rem, 38vw, 10.5rem); }
 .big-letter {
   font-family: var(--font);
   font-weight: 700;
@@ -297,6 +298,70 @@ svg { display: block; }
   box-shadow: 0 7px 0 #22874c;
 }
 .next-btn svg { width: 42px; height: 42px; }
+
+/* ---------- Syllable wheel, similar letters ---------- */
+
+.choices.four { gap: 10px; }
+.choices.four .card { max-width: 112px; border-radius: 22px; }
+.choices.four .card span { font-size: clamp(2.6rem, 12vw, 4.4rem); }
+.card.lit { background: #f3ecff; box-shadow: 0 6px 0 #ddd0f3, 0 0 0 4px #c9b6e8; transform: translateY(-4px); }
+.similar .choices .card { max-width: 170px; }
+
+/* ---------- Word exercises ---------- */
+
+.big-word {
+  font-family: var(--font);
+  font-weight: 700;
+  font-size: clamp(3.4rem, 16vw, 5.4rem);
+  line-height: 1.35;
+  padding: 6px 28px 2px;
+  background: var(--card);
+  border-radius: 28px;
+  box-shadow: var(--shadow);
+  white-space: nowrap;
+}
+.big-word .blank {
+  display: inline-block;
+  min-width: 1.1em;
+  text-align: center;
+  color: var(--amber);
+  border-bottom: 6px dashed var(--amber);
+  line-height: 1.1;
+}
+.big-word .blank.filled { color: var(--leaf); border-bottom-color: var(--leaf); }
+.choices.pics .card span { font-size: clamp(3.4rem, 16vw, 5rem); }
+.picture.small .pic { width: clamp(6.5rem, 34vw, 8.5rem); font-size: clamp(3.8rem, 19vw, 5.4rem); border-radius: 28px; }
+.word-stage { gap: 20px; }
+
+.slots { display: flex; gap: 10px; justify-content: center; }
+.slot {
+  min-width: 86px;
+  height: 92px;
+  padding: 0 8px;
+  border-radius: 22px;
+  border: 3px dashed #d9ccb6;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 2.9rem;
+}
+.slot.filled { border-style: solid; border-color: var(--leaf); background: var(--leaf-soft); }
+.slots.done .slot { animation: pop 0.4s ease; }
+.tiles { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+.tile {
+  min-width: 96px;
+  height: 96px;
+  padding: 0 12px;
+  border-radius: 24px;
+  background: var(--card);
+  box-shadow: 0 6px 0 var(--line), var(--shadow);
+  font-weight: 700;
+  font-size: 2.9rem;
+}
+.tile.used { visibility: hidden; }
+.tile.reveal { box-shadow: 0 6px 0 #9bdcae, 0 0 0 5px var(--leaf); animation: glow 1s ease-in-out infinite alternate; }
+.tile.wiggle { animation: wiggle 0.4s ease; }
+.tile:active { transform: scale(0.95); }
 
 /* ---------- Tracing ---------- */
 
@@ -436,7 +501,7 @@ svg { display: block; }
 
 .dash-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .card-box { background: var(--card); border-radius: 20px; padding: 16px; margin: 12px 0; box-shadow: 0 2px 0 var(--line); }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; text-align: center; }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 10px; text-align: center; }
 .stats b { display: block; font-size: 1.7rem; color: var(--trunk); }
 .stats span { font-size: 0.8rem; color: var(--muted); }
 
