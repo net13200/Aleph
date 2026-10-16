@@ -363,6 +363,35 @@ svg { display: block; }
 .tile.wiggle { animation: wiggle 0.4s ease; }
 .tile:active { transform: scale(0.95); }
 
+/* ---------- Reading rules, sentences ---------- */
+
+.big-letter.small-big {
+  display: grid;
+  place-items: center;
+  width: clamp(8rem, 40vw, 11rem);
+  font-size: clamp(5.5rem, 28vw, 8rem);
+}
+.similar.words .card { max-width: 180px; aspect-ratio: 1.5 / 1; }
+.similar.words .card span { font-size: clamp(2.4rem, 11vw, 3.6rem); }
+.big-word.sentence { font-size: clamp(2.2rem, 10vw, 3.4rem); white-space: normal; text-align: center; padding: 10px 22px; }
+.scenes .card { aspect-ratio: 1 / 1.05; }
+.scenes .card > span { display: block; position: relative; width: 100%; height: 100%; }
+.scene { position: relative; display: block; width: 100%; height: 100%; }
+.scene .place { position: absolute; inset: 14% 8% 0; display: grid; place-items: center; font-size: clamp(3rem, 14vw, 4.4rem); }
+.scene .who {
+  position: absolute;
+  top: 6%;
+  right: 8%;
+  font-size: clamp(1.9rem, 9vw, 2.8rem);
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.18));
+}
+.choices.scenes .card .place { font-size: clamp(3.4rem, 16vw, 4.8rem); }
+.choices.scenes .card .who { font-size: clamp(1.7rem, 8vw, 2.5rem); }
+.rule-toggles { display: flex; flex-direction: column; gap: 6px; }
+.toggle.rule { display: flex; align-items: center; gap: 12px; padding: 8px 12px; font-size: 0.95rem; text-align: right; }
+.rule-sample { font-size: 1.3rem; min-width: 5.5rem; text-align: center; }
+.map-cell.rule-cell { font-size: 0.85rem; width: auto !important; min-width: 64px; aspect-ratio: auto; padding: 8px 6px; }
+
 /* ---------- Tracing ---------- */
 
 .trace-wrap {

@@ -223,7 +223,7 @@
       if (isMark(c) && clusters.length) clusters[clusters.length - 1].text += c;
       else clusters.push({ text: c, base: c });
     }
-    const out = { syllables: [], niqqud: new Set(), letters: new Set(), ok: !UNSUPPORTED.test(word), genuva: false };
+    const out = { syllables: [], niqqud: new Set(), letters: new Set(), ok: !UNSUPPORTED.test(word), genuva: false, silentEnd: false, soft: false };
     let cur = null;
     clusters.forEach((cl, i) => {
       const marks = cl.text.slice(1);
@@ -242,12 +242,17 @@
       // Silent letters closing an open vowel: yod after i/e, he or alef at the end.
       const silent = !marks && prevHasVowel && ((cl.base === "י" && /hiriq|tsere|segol/.test(prev.vowel)) || ((cl.base === "ה" || cl.base === "א") && i === clusters.length - 1));
       if (silent) {
-        if (cl.base !== "י") out.letters.add(cl.base);
+        if (cl.base !== "י") {
+          out.letters.add(cl.base);
+          out.silentEnd = true; // ה/א read as a vowel: stage 7
+        }
         cur.text += cl.text;
         cl.mater = true;
         return;
       }
       out.letters.add(cl.base);
+      // Bet/kaf/pe without dagesh (and final kaf/pe) sound v/kh/f: stage 9.
+      if ("בכפךף".includes(cl.base) && !marks.includes(DAGESH)) out.soft = true;
       if (vowel || (clusters[i + 1] && clusters[i + 1].base === "ו" && /^(\u05B9|\u05BC)$/.test(clusters[i + 1].text.slice(1)) && !vowel)) {
         // Patach under a final ח/ע after an open vowel is read before the consonant.
         if (i === clusters.length - 1 && vowel === "patach" && "חע".includes(cl.base) && cur && !cur.closed) out.genuva = true;
@@ -269,6 +274,94 @@
     return out;
   }
   WORDS.forEach((w) => Object.assign(w, { parsed: parseWord(w.w) }));
+
+  // ---------- Reading rules (programme stages 7–10) ----------
+  // The parent marks these once they were taught in class.
+  const RULES = [
+    { id: "ehevi", name: "אותיות אהו״י כתנועה, ה׳ בסוף מילה", sample: "חוֹלָה" },
+    { id: "sameSound", name: "אותיות שנשמעות אותו דבר", sample: "ט–ת" },
+    { id: "dagesh", name: "אותיות שהניקוד משנה: בּ/ב, כּ/כ, פּ/פ, שׁ/שׂ", sample: "בּ/ב" },
+    { id: "sentences", name: "קריאת משפטים קצרים", sample: "הַדָּג בַּמַּיִם" },
+  ];
+
+  // Letters that sound the same. `a`/`b` are what the child sees; `needs`
+  // lists the base letters that must be learned; soft forms also need the
+  // dagesh rule.
+  const SIN_DOT = "\u05C2";
+  const TWINS = [
+    { a: "ת", b: "ט", needs: ["ת", "ט"] },
+    { a: "ק", b: "כּ", needs: ["ק", "כ"] },
+    { a: "ח", b: "כ", needs: ["ח", "כ"], soft: true },
+    { a: "ס", b: "שׂ", needs: ["ס", "ש"], soft: true },
+    { a: "ו", b: "ב", needs: ["ו", "ב"], soft: true },
+    { a: "א", b: "ע", needs: ["א", "ע"] },
+  ];
+
+  // Letters whose sound the niqqud changes: with/without dagesh, shin/sin dot.
+  const DAGESH_PAIRS = {
+    ב: { hard: "בּ", soft: "ב", softSound: "ו" },
+    כ: { hard: "כּ", soft: "כ", softSound: "ח" },
+    פ: { hard: "פּ", soft: "פ", softSound: "פ" },
+    ש: { hard: "שׁ", soft: "שׂ", softSound: "ס" },
+  };
+  function dageshForms(ch, niqqudId) {
+    const d = DAGESH_PAIRS[ch];
+    const sound = NQ[niqqudId].sound;
+    // Holam and shuruk are written on a vav after the letter.
+    const vowel = niqqudId === "holam" ? "ו\u05B9" : niqqudId === "shuruk" ? "ו" + DAGESH : NQ[niqqudId].mark;
+    return {
+      hard: { text: d.hard + vowel, spoken: onset(ch) + VOWEL_SPELL[sound] },
+      soft: { text: d.soft + vowel, spoken: d.softSound + VOWEL_SPELL[sound] },
+    };
+  }
+
+  // Word pairs that differ only by a final ה read as a vowel.
+  const EHEVI_PAIRS = [
+    ["חוֹל", "חוֹלָה"],
+    ["שִׁיר", "שִׁירָה"],
+    ["דָּג", "דָּגָה"],
+    ["סוּס", "סוּסָה"],
+    ["גַּן", "גַּנָּה"],
+    ["תּוֹר", "תּוֹרָה"],
+  ];
+
+  // Short sentences: a subject in a place. The picture is the subject's
+  // emoji placed on the place's emoji.
+  const SUBJECTS = [
+    { w: "הַדָּג", e: "🐟" },
+    { w: "הַכֶּלֶב", e: "🐶" },
+    { w: "הַסּוּס", e: "🐴" },
+    { w: "הַפִּיל", e: "🐘" },
+    { w: "הַקּוֹף", e: "🐒" },
+    { w: "הַצָּב", e: "🐢" },
+    { w: "הַיֶּלֶד", e: "👦" },
+    { w: "הַגָּמָל", e: "🐫" },
+    { w: "הַנָּחָשׁ", e: "🐍" },
+    { w: "הַצִּפּוֹר", e: "🐦" },
+    { w: "הַשָּׁפָן", e: "🐇" },
+  ];
+  const PLACES = [
+    { w: "בַּבַּיִת", e: "🏠" },
+    { w: "בַּמַּיִם", e: "💧" },
+    { w: "עַל הָעֵץ", e: "🌳" },
+    { w: "עַל הָהָר", e: "⛰️" },
+    { w: "בַּסַּל", e: "🧺" },
+    { w: "בַּמִּטָּה", e: "🛏️" },
+    { w: "בַּסִּירָה", e: "⛵" },
+    { w: "עַל הַכִּסֵּא", e: "🪑" },
+  ];
+  [SUBJECTS, PLACES].forEach((list) =>
+    list.forEach((x) => {
+      const parts = x.w.split(" ").map(parseWord);
+      x.parsed = {
+        ok: parts.every((q) => q.ok),
+        letters: [...new Set(parts.flatMap((q) => q.letters))],
+        niqqud: [...new Set(parts.flatMap((q) => q.niqqud))],
+        silentEnd: parts.some((q) => q.silentEnd),
+        soft: parts.some((q) => q.soft),
+      };
+    })
+  );
 
   // The sticker for each letter is the picture of its first word.
   function stickerFor(ch) {
@@ -399,6 +492,15 @@
     written: "כָּתוּב",
     andThisLetter: "וְזוֹ הָאוֹת",
     newMark: { m: "יֵשׁ לְךָ סִימָן נִקּוּד חָדָשׁ!", f: "יֵשׁ לָךְ סִימָן נִקּוּד חָדָשׁ!" },
+    soundsLike: "אֵיזוֹ אוֹת נִשְׁמַעַת כְּמוֹ",
+    andAlso: "וְגַם",
+    soundSame: "נִשְׁמָעוֹת אוֹתוֹ דָּבָר",
+    whereWritten: "אֵיפֹה כָּתוּב",
+    hereItSays: "כָּאן כָּתוּב",
+    whichEnd: "אֵיזוֹ אוֹת חֲסֵרָה בְּסוֹף הַמִּלָּה",
+    atEndWeWrite: "בְּסוֹף מִלָּה כּוֹתְבִים",
+    readSentence: { m: "קְרָא אֶת הַמִּשְׁפָּט, וּבְחַר אֶת הַתְּמוּנָה", f: "קִרְאִי אֶת הַמִּשְׁפָּט, וּבַחֲרִי אֶת הַתְּמוּנָה" },
+    inThisPicture: "בַּתְּמוּנָה הַזֹּאת",
     noStickersYet: "הַמַּדְבֵּקוֹת יַגִּיעוּ כְּשֶׁתִּלְמְדוּ אוֹתִיּוֹת",
   };
 
@@ -411,6 +513,13 @@
     LETTER,
     NIQQUD,
     NQ,
+    RULES,
+    TWINS,
+    DAGESH_PAIRS,
+    dageshForms,
+    EHEVI_PAIRS,
+    SUBJECTS,
+    PLACES,
     syllableSpoken,
     syllableAllowed,
     parseWord,

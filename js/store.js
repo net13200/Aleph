@@ -11,7 +11,8 @@
   const MASTERY_STREAK = 3; // correct in a row...
   const MASTERY_SESSIONS = 2; // ...spread over at least this many sessions
   // How many not-yet-mastered items of each kind practise at once.
-  const ACTIVE_NEW_LIMIT = { L: 4, S: 6, W: 4 };
+  // Reading rules (R) count per rule, so one rule doesn't crowd out the others.
+  const ACTIVE_NEW_LIMIT = { L: 4, S: 6, W: 4, R: 2, T: 1 };
   const SESSION_TASKS = 10;
 
   let state = load();
@@ -49,6 +50,7 @@
       grade: "א",
       letters: [],
       niqqud: [],
+      rules: [],
       rate: 0.85,
       progress: {},
       confusions: {},
@@ -83,6 +85,14 @@
       const word = D.WORDS.find((w) => w.w === ch);
       return { id, kind, word, display: word.w };
     }
+    if (kind === "R") {
+      // "R:twin:0", "R:dagesh:ב", "R:ehevi:0"
+      const rule = ch;
+      if (rule === "twin") return { id, kind, rule, twin: D.TWINS[+nq] };
+      if (rule === "dagesh") return { id, kind, rule, ch: nq };
+      return { id, kind, rule, pair: D.EHEVI_PAIRS[+nq] };
+    }
+    if (kind === "T") return { id, kind };
     return {
       id,
       kind,
@@ -116,21 +126,58 @@
       });
     });
     readableWords(p).forEach((w) => items.push("W:" + w.w));
+    const rules = p.rules || [];
+    if (rules.includes("ehevi")) {
+      D.EHEVI_PAIRS.forEach((pair, i) => pair.every((w) => readable(p, D.parseWord(w))) && items.push("R:ehevi:" + i));
+    }
+    if (rules.includes("sameSound")) {
+      D.TWINS.forEach((t, i) => t.needs.every((c) => p.letters.includes(c)) && (!t.soft || rules.includes("dagesh")) && items.push("R:twin:" + i));
+    }
+    if (rules.includes("dagesh") && p.niqqud.length) {
+      Object.keys(D.DAGESH_PAIRS).forEach((ch) => p.letters.includes(ch) && items.push("R:dagesh:" + ch));
+    }
+    if (rules.includes("sentences") && readableSentenceParts(p).ok) items.push("T:s");
     return items;
   }
 
-  // Words whose every letter and niqqud mark the child has learned in class.
-  function readableWords(p) {
-    return D.WORDS.filter(
-      (w) => w.parsed.ok && w.parsed.letters.every((c) => p.letters.includes(c)) && w.parsed.niqqud.every((n) => p.niqqud.includes(n))
+  // Can this child read it? Every letter and niqqud mark learned in class,
+  // plus the reading rules it depends on.
+  function readable(p, parsed) {
+    const rules = p.rules || [];
+    return (
+      parsed.ok &&
+      parsed.letters.every((c) => p.letters.includes(c)) &&
+      parsed.niqqud.every((n) => p.niqqud.includes(n)) &&
+      (!parsed.silentEnd || rules.includes("ehevi")) &&
+      (!parsed.soft || rules.includes("dagesh"))
     );
+  }
+
+  function readableWords(p) {
+    return D.WORDS.filter((w) => readable(p, w.parsed));
+  }
+
+  function readableSentenceParts(p) {
+    const subjects = D.SUBJECTS.filter((x) => readable(p, x.parsed));
+    const places = D.PLACES.filter((x) => readable(p, x.parsed));
+    return { subjects, places, ok: subjects.length >= 2 && places.length >= 2 };
+  }
+
+  // A sentence and three pictures: the right one, one with another subject, one with another place.
+  function sentenceTask(p) {
+    const { subjects, places } = readableSentenceParts(p);
+    const [s, s2] = shuffle(subjects.slice());
+    const [pl, pl2] = shuffle(places.slice());
+    const mk = (a, b) => ({ text: a.w + " " + b.w, subject: a, place: b });
+    const answer = mk(s, pl);
+    return { answer, choices: shuffle([answer, mk(s2, pl), mk(s, pl2)]) };
   }
 
   // Mastered items plus a few new ones. A syllable opens only after its
   // letter is mastered; new material opens as older material is mastered.
   function activeItems(p) {
     const out = [];
-    const fresh = { L: 0, S: 0, W: 0 };
+    const fresh = {};
     for (const id of candidateItems(p)) {
       if (isMastered(p, id)) {
         out.push(id);
@@ -140,9 +187,13 @@
       if (info.kind === "S" && !isMastered(p, "L:" + info.ch)) continue;
       // Words open once every letter in them is mastered.
       if (info.kind === "W" && !info.word.parsed.letters.every((c) => isMastered(p, "L:" + c))) continue;
-      if (fresh[info.kind] < ACTIVE_NEW_LIMIT[info.kind]) {
+      if (info.kind === "R" && !ruleItemLetters(info).every((c) => isMastered(p, "L:" + c))) continue;
+      // Sentences once a few words are read well.
+      if (info.kind === "T" && candidateItems(p).filter((x) => x.startsWith("W:") && isMastered(p, x)).length < 2) continue;
+      const bucket = info.kind === "R" ? "R:" + info.rule : info.kind;
+      if ((fresh[bucket] || 0) < ACTIVE_NEW_LIMIT[info.kind]) {
         out.push(id);
-        fresh[info.kind]++;
+        fresh[bucket] = (fresh[bucket] || 0) + 1;
       }
     }
     return out;
@@ -223,9 +274,14 @@
       if (n >= 2) types.push("missing");
       return types;
     }
+    if (info.kind === "R") return [info.rule];
+    if (info.kind === "T") return ["sentence"];
     const types = ["hear", "trace"];
     if (similarPartner(p, info.ch)) types.push("similar");
-    if (info.isFinal) return types;
+    if (info.isFinal) {
+      if (wordsEndingWith(info.ch).length) types.push("finalForm");
+      return types;
+    }
     const known = p.letters.filter((c) => !D.LETTER[c].finalOf);
     const canDistract = (target) => known.filter((c) => !D.soundsAlike(c, target)).length >= 2;
     if (D.WORDS.some((w) => w.first === info.base) && canDistract(info.base)) types.push("opening");
@@ -338,6 +394,17 @@
     return shuffle([answer, ...distractors]);
   }
 
+  function ruleItemLetters(info) {
+    if (info.rule === "twin") return info.twin.needs;
+    if (info.rule === "dagesh") return [info.ch];
+    return [...new Set(info.pair.flatMap((w) => D.parseWord(w).letters))];
+  }
+
+  // Words ending in a given final letter, for "which form goes at the end?".
+  function wordsEndingWith(ch) {
+    return D.WORDS.filter((w) => w.w.endsWith(ch));
+  }
+
   // Learned niqqud marks with a different sound, one per sound.
   function otherVowels(p, info) {
     const seen = new Set([info.sound]);
@@ -443,6 +510,15 @@
     return { status: mastered && mastered === ids.length ? "mastered" : seen ? "practice" : "learned", mastered, total: ids.length };
   }
 
+  function ruleStatus(p, ruleId) {
+    const prefix = { ehevi: "R:ehevi:", sameSound: "R:twin:", dagesh: "R:dagesh:", sentences: "T:" }[ruleId];
+    if (!(p.rules || []).includes(ruleId)) return { status: "off", mastered: 0, total: 0 };
+    const ids = candidateItems(p).filter((id) => id.startsWith(prefix));
+    const mastered = ids.filter((id) => isMastered(p, id)).length;
+    const seen = ids.some((id) => p.progress[id] && p.progress[id].seen);
+    return { status: ids.length && mastered === ids.length ? "mastered" : seen ? "practice" : "learned", mastered, total: ids.length };
+  }
+
   function topConfusions(p, n = 5) {
     return Object.entries(p.confusions)
       .sort((a, b) => b[1] - a[1])
@@ -485,6 +561,9 @@
     pictureChoices,
     missingChoices,
     readableWords,
+    readable,
+    sentenceTask,
+    wordsEndingWith,
     record,
     markIntroduced,
     recordConfusion,
@@ -493,6 +572,7 @@
     letterStatus,
     niqqudStatus,
     topConfusions,
+    ruleStatus,
     exportData,
     importData,
     resetAll,

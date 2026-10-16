@@ -34,6 +34,10 @@
     letter: (ch) => ({ key: "letter." + ch, text: D.LETTER[ch].name }),
     syl: (ch, sound) => ({ key: `syl.${ch}.${sound}`, text: D.syllableSpoken(ch, sound) }),
     nq: (id) => ({ key: "nq." + id, text: D.NQ[id].name }),
+    sylSoft: (ch, nq) => ({ key: `sylsoft.${ch}.${D.NQ[nq].sound}`, text: D.dageshForms(ch, nq).soft.spoken }),
+    sentence: (text) => ({ key: "sentence." + text, text }),
+    // A letter as shown (maybe with dagesh or a sin dot) is named by its base letter.
+    shown: (text) => seg.letter([...text][0]),
     // Any written syllable: a plain letter+vowel uses its syllable recording.
     part(text) {
       const p = D.parseWord(text);
@@ -299,6 +303,11 @@
       wordpic: wordPicTask,
       missing: missingTask,
       build: buildTask,
+      twin: twinTask,
+      dagesh: dageshTask,
+      ehevi: eheviTask,
+      finalForm: finalFormTask,
+      sentence: sentenceTask,
     }[task.type];
     run(task, info);
   }
@@ -663,6 +672,114 @@
     talk(prompt);
   }
 
+  // ---------- Stage 8: letters that sound the same ----------
+  function twinTask(task, info) {
+    const p = session.p;
+    const t = info.twin;
+    const others = p.letters.filter((c) => !D.LETTER[c].finalOf && !D.soundsAlike(c, t.a) && !t.needs.includes(c));
+    const pool = others.length >= 2 ? others : others.concat(D.RECOMMENDED_ORDER.filter((c) => !D.soundsAlike(c, t.a) && !t.needs.includes(c)));
+    const choices = [t.b].concat(pool.sort(() => Math.random() - 0.5).slice(0, 2)).sort(() => Math.random() - 0.5);
+    const target = seg.letter(t.a);
+    choiceTask(task, {
+      stageClass: "hear-stage twin-stage",
+      visual: `<div class="big-letter small-big">${t.a}</div>`,
+      choices,
+      answer: t.b,
+      prompt: [seg.p("soundsLike"), target],
+      onWrong1: (val) => [seg.p("thisIsLetter"), seg.shown(val), seg.p("soundsLike"), target],
+      onReveal: () => [seg.letter(t.a), seg.p("andAlso"), seg.shown(t.b), seg.p("soundSame")],
+      afterRight: () => talk([seg.letter(t.a), seg.p("andAlso"), seg.shown(t.b), seg.p("soundSame")]),
+    });
+  }
+
+  // ---------- Stage 9: dagesh and the shin/sin dot change the sound ----------
+  function dageshTask(task, info) {
+    const p = session.p;
+    const nq = pickOne(p.niqqud.filter((n) => D.syllableAllowed(info.ch, n)));
+    const f = D.dageshForms(info.ch, nq);
+    const soft = Math.random() < 0.5;
+    const segHard = seg.syl(info.ch, D.NQ[nq].sound);
+    const segSoft = seg.sylSoft(info.ch, nq);
+    const target = soft ? segSoft : segHard;
+    const segOf = (v) => (v === f.hard.text ? segHard : segSoft);
+    choiceTask(task, {
+      stageClass: "hear-stage similar",
+      visual: `<div class="ear-guide">${GUIDE}</div>`,
+      choices: [f.hard.text, f.soft.text].sort(() => Math.random() - 0.5),
+      answer: soft ? f.soft.text : f.hard.text,
+      prompt: [seg.p("where"), target],
+      onWrong1: (val) => [seg.p("thisIs"), segOf(val), seg.p("weLookForSyl"), target],
+      onReveal: () => [seg.p("thisIs"), target],
+      // Hear both, so the difference the dot makes is clear.
+      async afterRight() {
+        for (const card of $$(".card")) {
+          card.classList.add("lit");
+          await talk([segOf(card.dataset.v)]);
+          card.classList.remove("lit");
+        }
+      },
+    });
+  }
+
+  // ---------- Stage 7: ה at the end of a word is read as a vowel ----------
+  function eheviTask(task, info) {
+    const [a, b] = info.pair;
+    const target = pickOne([a, b]);
+    const ws = (w) => ({ key: "word." + w, text: w });
+    choiceTask(task, {
+      stageClass: "hear-stage similar words",
+      visual: `<div class="ear-guide">${GUIDE}</div>`,
+      choices: [a, b].sort(() => Math.random() - 0.5),
+      answer: target,
+      prompt: [seg.p("whereWritten"), ws(target)],
+      onWrong1: (val) => [seg.p("hereItSays"), ws(val), seg.p("whereWritten"), ws(target)],
+      onReveal: () => [seg.p("hereItSays"), ws(target)],
+    });
+  }
+
+  // ---------- Stage 9: final letters ----------
+  function finalFormTask(task, info) {
+    const p = session.p;
+    const w = pickOne(S.wordsEndingWith(info.ch));
+    const stem = w.w.slice(0, w.w.lastIndexOf(info.ch));
+    const others = D.LETTERS.filter((l) => l.finalOf && l.ch !== info.ch).map((l) => l.ch);
+    const choices = [info.ch, info.base, pickOne(others)].sort(() => Math.random() - 0.5);
+    choiceTask(task, {
+      stageClass: "word-stage",
+      visual: `<div class="picture small"><div class="pic">${w.e}</div></div><div class="big-word parts"><span>${stem}</span><span class="blank">?</span></div>`,
+      choices,
+      answer: info.ch,
+      prompt: [seg.p("whichEnd"), seg.word(w)],
+      onWrong1: (val) => [seg.p("thisIsLetter"), seg.letter(val), seg.p("listenAgain"), seg.word(w)],
+      onReveal: () => [seg.p("atEndWeWrite"), seg.letter(info.ch)],
+      async afterRight() {
+        const blank = $(".blank");
+        if (blank) {
+          blank.textContent = info.ch;
+          blank.classList.add("filled");
+        }
+        await talk([seg.word(w)]);
+      },
+    });
+  }
+
+  // ---------- Stage 10: read a sentence, pick its picture ----------
+  function sentenceTask(task) {
+    const { answer, choices } = S.sentenceTask(session.p);
+    const scene = (c) => `<span class="scene"><span class="place">${c.place.e}</span><span class="who">${c.subject.e}</span></span>`;
+    choiceTask(task, {
+      stageClass: "word-stage sentence-stage",
+      choicesClass: "pics scenes",
+      visual: `<div class="big-word sentence">${answer.text}</div>`,
+      choices: choices.map((c) => ({ v: c.text, label: scene(c) })),
+      answer: answer.text,
+      prompt: [seg.p("readSentence")],
+      onWrong1: (val) => [seg.p("inThisPicture"), seg.sentence(val), seg.p("readSentence")],
+      onReveal: () => [seg.p("written"), seg.sentence(answer.text)],
+      afterRight: () => talk([seg.sentence(answer.text)]),
+    });
+  }
+
   // ---------- Exercise: tracing ----------
   function traceTask(task, info) {
     const v = sessionShell(`<div class="trace-wrap" id="trace"></div>`, "trace-stage");
@@ -791,6 +908,12 @@
           </div>
           <h2>ניקוד</h2>
           ${nq}
+          <h2>כללי קריאה</h2>
+          ${D.RULES.map((r) => {
+            const st = S.ruleStatus(p, r.id);
+            const detail = st.status === "off" ? statusLabel.off : `${st.mastered} מתוך ${st.total} תרגילים נלמדו`;
+            return `<div class="nq-row"><div class="map-cell ${st.status} rule-cell">${r.sample}</div><div><b>${r.name}</b><br><span class="muted">${detail}</span></div></div>`;
+          }).join("")}
         </section>
         <section class="card-box">
           <h2>בלבולים נפוצים</h2>
@@ -859,6 +982,14 @@
       })
     );
     D.WORDS.forEach((w) => rows.push({ label: `${w.e} ${w.w}`, segs: [seg.word(w)] }));
+    Object.keys(D.DAGESH_PAIRS).forEach((ch) =>
+      D.NIQQUD.forEach((n) => {
+        if (!D.syllableAllowed(ch, n.id) || D.NIQQUD.find((m) => m.sound === n.sound) !== n) return;
+        rows.push({ label: D.dageshForms(ch, n.id).soft.text, segs: [seg.sylSoft(ch, n.id)] });
+      })
+    );
+    D.EHEVI_PAIRS.flat().forEach((w) => rows.push({ label: w, segs: [{ key: "word." + w, text: w }] }));
+    D.SUBJECTS.forEach((s) => D.PLACES.forEach((pl) => rows.push({ label: `${s.e}${pl.e} ${s.w} ${pl.w}`, segs: [seg.sentence(s.w + " " + pl.w)] })));
     const parts = new Set();
     D.WORDS.forEach((w) => w.parsed.ok && w.parsed.syllables.forEach((x) => parts.add(x)));
     [...parts].map((x) => seg.part(x)).filter((g) => g.key.startsWith("part.")).forEach((g) => rows.push({ label: g.text, segs: [g] }));
@@ -916,6 +1047,13 @@
           <div class="toggles nq-toggles">${nq}</div>
           <p class="muted">מילים לקריאה מופיעות רק כשכל האותיות וסימני הניקוד שלהן סומנו כאן.</p>
         </div>
+        <div class="field"><span>מה עוד נלמד?</span>
+          <div class="rule-toggles">${D.RULES.map(
+            (r) => `<button type="button" class="toggle rule ${(p.rules || []).includes(r.id) ? "on" : ""}" data-rule="${r.id}" aria-pressed="${(p.rules || []).includes(r.id)}">
+              <span class="rule-sample">${r.sample}</span><span>${r.name}</span></button>`
+          ).join("")}</div>
+          <p class="muted">מילים עם ה׳ בסוף, או עם ב/כ/פ בלי דגש, מופיעות רק אחרי שהכלל המתאים סומן.</p>
+        </div>
         <label class="field"><span>מהירות הקול</span>
           <div class="rate-row"><input id="rate" type="range" min="0.6" max="1.1" step="0.05" value="${p.rate}"><button type="button" class="icon-btn" id="try" aria-label="דוגמה">${ICON.speaker}</button></div>
         </label>
@@ -925,6 +1063,12 @@
       "parent"
     );
     $$(".toggle[data-ch]").forEach((b) =>
+      b.addEventListener("click", () => {
+        const on = b.classList.toggle("on");
+        b.setAttribute("aria-pressed", on);
+      })
+    );
+    $$(".toggle[data-rule]").forEach((b) =>
       b.addEventListener("click", () => {
         const on = b.classList.toggle("on");
         b.setAttribute("aria-pressed", on);
@@ -966,6 +1110,7 @@
       p.grade = $("#grade .on").dataset.v;
       p.letters = $$(".toggle[data-ch].on").map((b) => b.dataset.ch);
       p.niqqud = $$(".toggle[data-nq].on").map((b) => b.dataset.nq);
+      p.rules = $$(".toggle[data-rule].on").map((b) => b.dataset.rule);
       p.rate = Number($("#rate").value);
       A.setRate(p.rate);
       S.saveProfile(p);
