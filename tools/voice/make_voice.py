@@ -234,6 +234,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--voice", default="model")
     ap.add_argument("--only", default="", help="comma-separated key prefixes")
+    ap.add_argument("--keys", default="", help="file with one key per line to (re)generate")
     ap.add_argument("--length-scale", type=float, default=1.12, help=">1 is slower, for young listeners")
     args = ap.parse_args()
 
@@ -253,6 +254,9 @@ def main():
     if args.only:
         prefixes = tuple(p + "." for p in args.only.split(","))
         items = [i for i in items if i["key"].startswith(prefixes)]
+    if args.keys:
+        wanted = set(open(args.keys).read().split("\n"))
+        items = [i for i in items if i["key"] in wanted]
     os.makedirs(args.out, exist_ok=True)
     manifest_path = os.path.join(args.out, "manifest.json")
     manifest = json.load(open(manifest_path)) if os.path.exists(manifest_path) else {}
@@ -304,25 +308,32 @@ def main():
             break
         pending = retry
 
-    # 2. Write files, manifest and report.
+    # 2. Write files, manifest and report. Only recordings that passed the
+    # automatic checks go in the manifest; the rest are candidates a parent
+    # listens to and approves in the app (voice check).
+    cand_path = os.path.join(args.out, "candidates.json")
+    candidates = json.load(open(cand_path)) if os.path.exists(cand_path) else {}
     report = []
     for job in jobs:
         item, kind = job["item"], job["kind"]
         status = "fail" if job["problems"] else ("listen" if kind in SHORT_KINDS or not job["matched"] else "pass")
         fname = hashlib.sha1(item["key"].encode()).hexdigest()[:12] + ".mp3"
-        if status != "fail":
-            with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
-                sf.write(tmp.name, job["audio"], job["sr"])
-                subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp.name, "-ac", "1", "-ar", "22050", "-b:a", "48k", os.path.join(args.out, fname)], check=True)
+        with tempfile.NamedTemporaryFile(suffix=".wav") as tmp:
+            sf.write(tmp.name, job["audio"], job["sr"])
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", tmp.name, "-ac", "1", "-ar", "22050", "-b:a", "48k", os.path.join(args.out, fname)], check=True)
+        if status == "pass":
             manifest[item["key"]] = fname
+            candidates.pop(item["key"], None)
         else:
             manifest.pop(item["key"], None)
+            candidates[item["key"]] = fname
         report.append(dict(key=item["key"], text=item["text"], label=item.get("label"), enhanced=job["enhanced"], ipa=job["ipa"],
                            stress_from_model=job["matched"], status=status, voice=job["voice"], heard=job["heard"], score=job["score"],
-                           problems=job["problems"], duration=job["stats"].get("duration"), file=fname if status != "fail" else None))
+                           problems=job["problems"], duration=job["stats"].get("duration"), file=fname))
         print(f"{status:6} {item['key']}  /{job['ipa']}/  heard: {job['heard']}  {'; '.join(job['problems'])}")
 
     json.dump(dict(sorted(manifest.items())), open(manifest_path, "w"), ensure_ascii=False, indent=1)
+    json.dump(dict(sorted(candidates.items())), open(cand_path, "w"), ensure_ascii=False, indent=1)
     rep_path = os.path.join(args.out, "voice-report.json")
     old = {r["key"]: r for r in json.load(open(rep_path))} if os.path.exists(rep_path) else {}
     old.update({r["key"]: r for r in report})

@@ -2,8 +2,11 @@
  *
  * Every spoken segment is { key, text }. What plays, in order of preference:
  *   1. the parent's own recording of that item (kept in IndexedDB on the device),
- *   2. the checked recording listed in audio/manifest.json (tools/voice/),
- *   3. the device's Hebrew voice reading `text` (it often ignores niqqud).
+ *   2. the recording listed in audio/manifest.json, which passed the automatic
+ *      checks in tools/voice/,
+ *   3. a candidate recording (audio/candidates.json) the parent listened to and
+ *      approved in the voice check — short items machines can't check,
+ *   4. the device's Hebrew voice reading `text` (it often ignores niqqud).
  * Sound effects are synthesized with WebAudio so nothing needs downloading. */
 (() => {
   "use strict";
@@ -13,6 +16,17 @@
   let manifest = {};
   let status = {}; // key → "listen" | "fail", from the recording checks
   let own = new Set(); // keys the parent recorded
+  let candidates = {}; // key → file awaiting the parent's approval
+  const APPROVED_KEY = "aleph.approvedVoice";
+  let approved = new Set();
+  try {
+    approved = new Set(JSON.parse(localStorage.getItem(APPROVED_KEY) || "[]"));
+  } catch (_) {}
+  function saveApproved() {
+    try {
+      localStorage.setItem(APPROVED_KEY, JSON.stringify([...approved]));
+    } catch (_) {}
+  }
   let rate = 0.85;
   let voice = null;
   let ctx = null;
@@ -39,6 +53,12 @@
       if (res.ok) manifest = await res.json();
     } catch (_) {
       manifest = {};
+    }
+    try {
+      const res = await fetch("audio/candidates.json", { cache: "no-cache" });
+      if (res.ok) candidates = await res.json();
+    } catch (_) {
+      candidates = {};
     }
     try {
       const res = await fetch("audio/voice-status.json", { cache: "no-cache" });
@@ -164,7 +184,7 @@
           continue;
         }
       }
-      const file = seg.key && manifest[seg.key];
+      const file = seg.key && (manifest[seg.key] || (approved.has(seg.key) && candidates[seg.key]));
       if (file) {
         await playFile("audio/" + file);
         // Recordings are trimmed tight; leave a breath between segments.
@@ -250,7 +270,22 @@
     },
     // For the parent's voice check.
     source(key) {
-      return own.has(key) ? "own" : manifest[key] ? "file" : "device";
+      if (own.has(key)) return "own";
+      if (manifest[key]) return "file";
+      if (candidates[key]) return approved.has(key) ? "approved" : "candidate";
+      return "device";
+    },
+    // Plays the candidate recording so the parent can judge it.
+    async preview(seg) {
+      if (candidates[seg.key] && !own.has(seg.key)) {
+        stop();
+        await playFile("audio/" + candidates[seg.key]);
+      } else await say([seg]);
+    },
+    approve(key, yes) {
+      if (yes) approved.add(key);
+      else approved.delete(key);
+      saveApproved();
     },
     checkStatus: (key) => status[key] || null,
     record,

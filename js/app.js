@@ -952,46 +952,72 @@
   // confirm come first; the parent listens and can record their own voice.
   function voiceCheck(filter) {
     const all = SP.all();
-    const status = (key) => (A.source(key) === "own" ? null : A.checkStatus(key) || (A.source(key) === "device" ? "device" : null));
-    const toCheck = all.filter((x) => status(x.key) && status(x.key) !== "device");
+    // What still needs a person: candidates not yet approved (and not replaced by the parent's own voice).
+    const pending = (key) => A.source(key) === "candidate";
+    const toCheck = all.filter((x) => pending(x.key));
     filter = filter || (toCheck.length ? "check" : "all");
-    const rank = { fail: 0, listen: 1, device: 2 };
-    const rows = (filter === "check" ? toCheck : all).slice().sort((a, b) => (rank[status(a.key)] ?? 3) - (rank[status(b.key)] ?? 3));
+    const order = (x) => (A.checkStatus(x.key) === "fail" ? 0 : pending(x.key) ? 1 : 2);
+    const rows = (filter === "check" ? toCheck : all).slice().sort((a, b) => order(a) - order(b));
     const badge = (key) => {
-      if (A.source(key) === "own") return `<span class="badge own">הקול שלך</span>`;
-      const st = status(key);
-      if (st === "fail") return `<span class="badge fail">צריך הקלטה</span>`;
-      if (st === "listen") return `<span class="badge listen">להאזנה</span>`;
-      if (st === "device") return `<span class="badge">קול המכשיר</span>`;
+      const src = A.source(key);
+      if (src === "own") return `<span class="badge own">הקול שלך</span>`;
+      if (src === "approved") return `<span class="badge own">אושר</span>`;
+      if (src === "candidate") return A.checkStatus(key) === "fail" ? `<span class="badge fail">לא עבר בדיקה</span>` : `<span class="badge listen">להאזנה</span>`;
+      if (src === "device") return `<span class="badge">קול המכשיר</span>`;
       return "";
     };
     const canRec = A.canRecord();
     show(
       `<div class="parent-page">
         <div class="dash-head"><h1>בדיקת קול</h1><button class="btn small" id="back">חזרה</button></div>
-        <p class="muted">כל מה שהילד שומע מוקלט מראש ונבדק אוטומטית. <b>להאזנה</b> — קטעים קצרים (צירופים, הברות) שמכונה לא יכולה לבדוק: כדאי להאזין להם. <b>צריך הקלטה</b> — נכשלו בבדיקה האוטומטית.${canRec ? " אם משהו נשמע לא נכון, אפשר להקליט אותו בקול שלכם (🎙️) — ההקלטה נשמרת רק במכשיר הזה." : ""}</p>
+        <p class="muted">משפטים, הנחיות ורוב המילים מוקלטים מראש ועברו בדיקה אוטומטית. אותיות, צירופים והברות קצרים מכדי שמכונה תבדוק אותם, ולכן הם ממתינים להאזנה שלכם: לחצו על השורה כדי לשמוע, ועל ✓ אם נשמע נכון. עד אז מושמע הקול של המכשיר.${canRec ? " אם משהו נשמע לא נכון, אפשר להקליט אותו בקול שלכם (🎙️) — ההקלטה נשמרת רק במכשיר הזה." : ""}</p>
         <div class="seg-ctl" id="filter">
-          <button type="button" data-v="check" class="${filter === "check" ? "on" : ""}">לבדיקה (${toCheck.length})</button>
+          <button type="button" data-v="check" class="${filter === "check" ? "on" : ""}">להאזנה (${toCheck.length})</button>
           <button type="button" data-v="all" class="${filter === "all" ? "on" : ""}">הכול (${all.length})</button>
         </div>
+        ${filter === "check" && toCheck.length ? `<button class="btn small approve-all" id="approveAll">אישור כל מה ששמעתי ברשימה</button>` : ""}
         <div class="voice-list">${rows
-          .map(
-            (r, i) => `<div class="voice-row" data-i="${i}">
+          .map((r, i) => {
+            const src = A.source(r.key);
+            return `<div class="voice-row" data-i="${i}">
               <button class="play">${ICON.speaker}<span>${r.label}</span></button>${badge(r.key)}
+              ${src === "candidate" ? `<button class="mini ok" aria-label="נשמע נכון">✓</button>` : ""}
+              ${src === "approved" ? `<button class="mini undo" aria-label="ביטול אישור">↺</button>` : ""}
               ${canRec ? `<button class="mini rec" aria-label="הקלטה">${ICON.mic}</button>` : ""}
-              ${A.source(r.key) === "own" ? `<button class="mini del" aria-label="מחיקת ההקלטה שלי">${ICON.close}</button>` : ""}
-            </div>`
-          )
+              ${src === "own" ? `<button class="mini del" aria-label="מחיקת ההקלטה שלי">${ICON.close}</button>` : ""}
+            </div>`;
+          })
           .join("")}</div>
       </div>`,
       "parent"
     );
     on("#back", "click", parentHome);
     $$("#filter button").forEach((b) => b.addEventListener("click", () => voiceCheck(b.dataset.v)));
+    const heard = new Set();
+    on("#approveAll", "click", () => {
+      if (!heard.size) return alert("קודם האזינו לפריטים — רק מה ששמעתם יאושר.");
+      heard.forEach((k) => A.approve(k, true));
+      voiceCheck(filter);
+    });
     let recording = null;
     $$(".voice-row").forEach((row) => {
       const r = rows[+row.dataset.i];
-      row.querySelector(".play").addEventListener("click", () => A.say([r]));
+      row.querySelector(".play").addEventListener("click", () => {
+        heard.add(r.key);
+        A.preview(r);
+      });
+      const ok = row.querySelector(".ok");
+      ok &&
+        ok.addEventListener("click", () => {
+          A.approve(r.key, true);
+          voiceCheck(filter);
+        });
+      const undo = row.querySelector(".undo");
+      undo &&
+        undo.addEventListener("click", () => {
+          A.approve(r.key, false);
+          voiceCheck(filter);
+        });
       const rec = row.querySelector(".rec");
       rec &&
         rec.addEventListener("click", async () => {

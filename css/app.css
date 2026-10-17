@@ -598,6 +598,8 @@ input[type="text"]:focus { outline: none; border-color: var(--leaf); }
 .voice-row .play svg { width: 20px; height: 20px; color: var(--leaf); flex: none; }
 .voice-row .mini { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #f4efe6; color: var(--muted); flex: none; }
 .voice-row .mini svg { width: 18px; height: 18px; }
+.voice-row .mini.ok { background: var(--leaf); color: #fff; font-weight: 800; font-size: 1.1rem; }
+.approve-all { margin: 10px 0 0; }
 .voice-row .rec.on { background: #e5484d; color: #fff; animation: glow 0.8s ease-in-out infinite alternate; }
 .badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 999px; background: #f1ede6; color: var(--muted); white-space: nowrap; flex: none; }
 .badge.listen { background: var(--amber-soft); color: #9a5b00; }
