@@ -1,11 +1,10 @@
 /* Offline support: everything the app needs is cached on install. */
-const CACHE = "aleph-v7";
+const CACHE = "aleph-v8";
 const SHELL = [
   "./",
   "index.html",
   "css/app.css",
   "js/data.js",
-  "js/speech.js",
   "js/audio.js",
   "js/store.js",
   "js/trace.js",
@@ -20,8 +19,6 @@ const SHELL = [
   "fonts/noto-sans-hebrew-latin.woff2",
   "fonts/baloo2-sugigames.woff2",
   "audio/manifest.json",
-  "audio/voice-status.json",
-  "audio/candidates.json",
 ];
 
 self.addEventListener("install", (e) => {
@@ -34,8 +31,6 @@ self.addEventListener("install", (e) => {
         try {
           const res = await fetch("audio/manifest.json", { cache: "no-cache" });
           const files = Object.values(await res.json());
-          const cand = await fetch("audio/candidates.json", { cache: "no-cache" });
-          if (cand.ok) files.push(...Object.values(await cand.json()));
           await cache.addAll([...new Set(files)].map((f) => "audio/" + f));
         } catch (_) {}
       })
