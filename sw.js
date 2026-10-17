@@ -1,5 +1,5 @@
 /* Offline support: everything the app needs is cached on install. */
-const CACHE = "aleph-v9";
+const CACHE = "aleph-v10";
 const SHELL = [
   "./",
   "index.html",

@@ -12,7 +12,7 @@
   const MASTERY_SESSIONS = 2; // ...spread over at least this many sessions
   // How many not-yet-mastered items of each kind practise at once.
   // Reading rules (R) count per rule, so one rule doesn't crowd out the others.
-  const ACTIVE_NEW_LIMIT = { L: 4, S: 6, W: 4, R: 2, T: 1 };
+  const ACTIVE_NEW_LIMIT = { L: 4, S: 6, W: 4, R: 2, T: 1, G: 2 };
   const SESSION_TASKS = 10;
 
   let state = load();
@@ -93,6 +93,7 @@
       return { id, kind, rule, pair: D.EHEVI_PAIRS[+nq] };
     }
     if (kind === "T") return { id, kind };
+    if (kind === "G") return { id, kind, sub: ch, idx: +nq };
     return {
       id,
       kind,
@@ -137,7 +138,98 @@
       Object.keys(D.DAGESH_PAIRS).forEach((ch) => p.letters.includes(ch) && items.push("R:dagesh:" + ch));
     }
     if (rules.includes("sentences") && readableSentenceParts(p).ok) items.push("T:s");
+    if (p.grade === "ב") items.push(...grade2Items(p));
     return items;
+  }
+
+  // ---------- Grade 2 ----------
+  function canRead(p, text) {
+    return text.split(" ").every((w) => readable(p, D.parseWord(w)));
+  }
+
+  function grade2Items(p) {
+    const items = [];
+    D.TUNES.forEach((g, i) => g.filter((w) => canRead(p, w)).length >= 4 && items.push("G:tune:" + i));
+    D.PLURALS.forEach((x, i) => canRead(p, x.one) && canRead(p, x.many) && items.push("G:plural:" + i));
+    const famWords = D.FAMILIES.map((f) => f.words.filter((w) => canRead(p, w)));
+    D.FAMILIES.forEach((f, i) => {
+      const others = famWords.filter((_, j) => j !== i).flat();
+      if (famWords[i].length >= 2 && others.length >= 2) items.push("G:family:" + i);
+    });
+    D.PREFIXES.forEach((x, i) => x.forms.filter((w) => canRead(p, w)).length >= 3 && items.push("G:prefix:" + i));
+    const parts = readableSentenceParts(p);
+    const qWords = Object.values(D.QUESTION_WORDS).filter((w) => canRead(p, w));
+    if (parts.ok && qWords.length) items.push("G:punct:0");
+    if (bareWords(p).length >= 3) items.push("G:bare:0");
+    if (parts.subjects.length >= 2 && parts.places.length >= 3 && canRead(p, D.QUESTION_WORDS.where)) items.push("G:story:0");
+    return items;
+  }
+
+  // Words for reading without niqqud: only their letters need to be known.
+  function bareWords(p) {
+    return D.BARE_WORDS.map((w) => D.WORDS.find((x) => x.w === w))
+      .filter((w) => w && [...D.stripNiqqud(w.w)].every((c) => p.letters.includes(c)));
+  }
+
+  function tuneWords(p, idx) {
+    return shuffle(D.TUNES[idx].filter((w) => canRead(p, w))).slice(0, 4);
+  }
+
+  // A word, another from its family, and two from other families.
+  function familyTask(p, idx) {
+    const own = shuffle(D.FAMILIES[idx].words.filter((w) => canRead(p, w)));
+    const others = shuffle(D.FAMILIES.filter((_, j) => j !== idx).flatMap((f) => f.words.filter((w) => canRead(p, w))));
+    // Two distractors from different families.
+    const picked = [];
+    for (const w of others) {
+      const fam = D.FAMILIES.find((f) => f.words.includes(w));
+      if (!picked.some((x) => D.FAMILIES.find((f) => f.words.includes(x)) === fam)) picked.push(w);
+      if (picked.length === 2) break;
+    }
+    return { word: own[0], answer: own[1], choices: shuffle([own[1]].concat(picked)) };
+  }
+
+  function prefixTask(p, idx) {
+    const forms = shuffle(D.PREFIXES[idx].forms.filter((w) => canRead(p, w))).slice(0, 3);
+    return { target: forms[0], choices: shuffle(forms.slice()) };
+  }
+
+  // A sentence without its end mark: a statement, or a question.
+  function punctTask(p) {
+    const { subjects, places } = readableSentenceParts(p);
+    const s = shuffle(subjects.slice())[0];
+    const pl = shuffle(places.slice())[0];
+    const Q = D.QUESTION_WORDS;
+    const options = [{ text: `${s.w} ${pl.w}`, question: false }];
+    if (canRead(p, Q.where)) options.push({ text: `${Q.where} ${s.w}`, question: true });
+    if (canRead(p, Q.who)) options.push({ text: `${Q.who} ${pl.w}`, question: true });
+    if (canRead(p, Q.whether)) options.push({ text: `${Q.whether} ${s.w} ${pl.w}`, question: true });
+    // Half statements, half questions.
+    return Math.random() < 0.5 ? options[0] : shuffle(options.slice(1))[0] || options[0];
+  }
+
+  // Two sentences, and a question about where one of them is.
+  function storyTask(p) {
+    const { subjects, places } = readableSentenceParts(p);
+    const [s1, s2] = shuffle(subjects.slice());
+    const [pl1, pl2, pl3] = shuffle(places.slice());
+    const askFirst = Math.random() < 0.5;
+    const who = askFirst ? s1 : s2;
+    const answer = askFirst ? pl1 : pl2;
+    return {
+      story: `${s1.w} ${pl1.w}. ${s2.w} ${pl2.w}.`,
+      question: `${D.QUESTION_WORDS.where} ${who.w}?`,
+      answer,
+      choices: shuffle([pl1, pl2, pl3]),
+    };
+  }
+
+  function grade2Status(p, sub) {
+    if (p.grade !== "ב") return { status: "off", mastered: 0, total: 0 };
+    const ids = candidateItems(p).filter((id) => id.startsWith("G:" + sub + ":"));
+    const mastered = ids.filter((id) => isMastered(p, id)).length;
+    const seen = ids.some((id) => p.progress[id] && p.progress[id].seen);
+    return { status: ids.length && mastered === ids.length ? "mastered" : seen ? "practice" : ids.length ? "learned" : "off", mastered, total: ids.length };
   }
 
   // Can this child read it? Every letter and niqqud mark learned in class,
@@ -145,7 +237,7 @@
   function readable(p, parsed) {
     const rules = p.rules || [];
     return (
-      parsed.ok &&
+      (parsed.readOk !== undefined ? parsed.readOk : parsed.ok) &&
       parsed.letters.every((c) => p.letters.includes(c)) &&
       parsed.niqqud.every((n) => p.niqqud.includes(n)) &&
       (!parsed.silentEnd || rules.includes("ehevi")) &&
@@ -153,8 +245,9 @@
     );
   }
 
+  // Words for the syllable and picture exercises (no shva or hataf, so the syllable split is reliable).
   function readableWords(p) {
-    return D.WORDS.filter((w) => readable(p, w.parsed));
+    return D.WORDS.filter((w) => w.parsed.ok && readable(p, w.parsed));
   }
 
   function readableSentenceParts(p) {
@@ -190,7 +283,7 @@
       if (info.kind === "R" && !ruleItemLetters(info).every((c) => isMastered(p, "L:" + c))) continue;
       // Sentences once a few words are read well.
       if (info.kind === "T" && candidateItems(p).filter((x) => x.startsWith("W:") && isMastered(p, x)).length < 2) continue;
-      const bucket = info.kind === "R" ? "R:" + info.rule : info.kind;
+      const bucket = info.kind === "R" ? "R:" + info.rule : info.kind === "G" ? "G:" + info.sub : info.kind;
       if ((fresh[bucket] || 0) < ACTIVE_NEW_LIMIT[info.kind]) {
         out.push(id);
         fresh[bucket] = (fresh[bucket] || 0) + 1;
@@ -276,6 +369,7 @@
     }
     if (info.kind === "R") return [info.rule];
     if (info.kind === "T") return ["sentence"];
+    if (info.kind === "G") return [info.sub];
     const types = ["hear", "trace"];
     if (similarPartner(p, info.ch)) types.push("similar");
     if (info.isFinal) {
@@ -291,9 +385,14 @@
 
   function weight(p, id, sessionNo) {
     const r = p.progress[id];
-    if (!r || !r.seen) return 4;
-    let w = r.mastered ? 0.6 : 3;
-    if (r.lastWrong && sessionNo - r.lastWrong <= 2) w += 2; // recent mistakes come back sooner
+    let w;
+    if (!r || !r.seen) w = 4;
+    else {
+      w = r.mastered ? 0.6 : 3;
+      if (r.lastWrong && sessionNo - r.lastWrong <= 2) w += 2; // recent mistakes come back sooner
+    }
+    // In grade 2, grade-1 material stays as light review.
+    if (p.grade === "ב" && id[0] !== "G") w *= 0.3;
     return w;
   }
 
@@ -343,10 +442,15 @@
       }
     }
 
-    // A letter the child hasn't met in the app gets a short introduction first.
+    // A letter the child hasn't met in the app gets a short introduction first
+    // (not in grade 2: the child already knows them all).
     const out = [];
     const introduced = new Set();
     tasks.forEach((t) => {
+      if (p.grade === "ב") {
+        out.push(t);
+        return;
+      }
       const info = itemInfo(t.id);
       const r = p.progress[t.id];
       if (info.kind === "L" && !(r && r.introduced) && !introduced.has(t.id)) {
@@ -563,6 +667,14 @@
     readableWords,
     readable,
     sentenceTask,
+    canRead,
+    bareWords,
+    tuneWords,
+    familyTask,
+    prefixTask,
+    punctTask,
+    storyTask,
+    grade2Status,
     wordsEndingWith,
     record,
     markIntroduced,

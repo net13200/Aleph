@@ -392,6 +392,33 @@ svg { display: block; }
 .rule-sample { font-size: 1.3rem; min-width: 5.5rem; text-align: center; }
 .map-cell.rule-cell { font-size: 0.85rem; width: auto !important; min-width: 64px; aspect-ratio: auto; padding: 8px 6px; }
 
+/* ---------- Grade 2 ---------- */
+
+.choices.words4 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 420px; }
+.choices.words4 .card { max-width: none; aspect-ratio: auto; padding: 18px 8px; }
+.choices.words4 .card span { font-size: clamp(2rem, 9vw, 2.8rem); }
+.choices.words2 .card, .choices.words3 .card { max-width: 190px; aspect-ratio: auto; padding: 22px 6px; }
+.choices.words2 .card span { font-size: clamp(2.2rem, 10vw, 3.2rem); }
+.choices.words3 .card span { font-size: clamp(1.6rem, 7.4vw, 2.5rem); }
+.choices.marks .card { max-width: 130px; }
+.choices.marks .card span { font-size: 5rem; font-weight: 800; }
+.pic.count { display: flex; flex-wrap: wrap; align-content: center; justify-content: center; gap: 0 4px; }
+.pic.count.many span { font-size: 0.5em; }
+.story {
+  background: var(--card);
+  border-radius: 24px;
+  box-shadow: var(--shadow);
+  padding: 14px 22px;
+  font-weight: 700;
+  font-size: clamp(1.7rem, 7.6vw, 2.4rem);
+  line-height: 1.6;
+  text-align: center;
+  max-width: 100%;
+}
+.story p { margin: 0; }
+.story .question { color: var(--trunk); margin-top: 6px; border-top: 2px dashed var(--line); padding-top: 6px; }
+.map-cell.dot-cell { width: 18px !important; min-width: 18px; height: 18px; aspect-ratio: 1; border-radius: 50%; }
+
 /* ---------- Tracing ---------- */
 
 .trace-wrap {

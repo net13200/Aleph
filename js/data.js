@@ -87,6 +87,9 @@
     { id: "tsere", mark: "\u05B5", name: "צֵירֵה", sound: "e" },
     { id: "shuruk", mark: "\u05BC", name: "שׁוּרוּק", sound: "u" },
     { id: "kubutz", mark: "\u05BB", name: "קֻבּוּץ", sound: "u" },
+    // Shva and hataf have no syllable drills; they unlock words that use them.
+    { id: "shva", mark: "\u05B0", name: "שְׁוָא", sound: null },
+    { id: "hataf", mark: "\u05B2", name: "חֲטָפִים", sound: null },
   ];
   const NQ = Object.fromEntries(NIQQUD.map((n) => [n.id, n]));
   const DAGESH = "\u05BC";
@@ -110,6 +113,7 @@
 
   // Letters that don't form a sensible open syllable with a vowel.
   function syllableAllowed(ch, niqqudId) {
+    if (!NQ[niqqudId].sound) return false;
     if (LETTER[ch].finalOf) return false;
     if (ch === "ו" && (niqqudId === "holam" || niqqudId === "shuruk")) return false;
     return true;
@@ -269,6 +273,10 @@
     });
     out.syllables = out.syllables.map((x) => x.text);
     if (out.genuva) out.ok = false;
+    // `ok`: simple enough for syllable work. Reading only needs the marks to be learned.
+    out.readOk = !/\u05C7/.test(word);
+    if (/\u05B0/.test(word)) out.niqqud.add("shva");
+    if (/[\u05B1-\u05B3]/.test(word)) out.niqqud.add("hataf");
     out.niqqud = [...out.niqqud];
     out.letters = [...out.letters];
     return out;
@@ -355,6 +363,7 @@
       const parts = x.w.split(" ").map(parseWord);
       x.parsed = {
         ok: parts.every((q) => q.ok),
+        readOk: parts.every((q) => q.readOk),
         letters: [...new Set(parts.flatMap((q) => q.letters))],
         niqqud: [...new Set(parts.flatMap((q) => q.niqqud))],
         silentEnd: parts.some((q) => q.silentEnd),
@@ -362,6 +371,78 @@
       };
     })
   );
+
+  // ---------- Grade 2 (programme stages 11–12) ----------
+  // Words "in the same tune": one pattern, read quickly as a family.
+  const TUNES = [
+    ["רוֹקְדִים", "קוֹפְצִים", "אוֹכְלִים", "כּוֹתְבִים", "הוֹלְכִים", "יוֹשְׁבִים", "לוֹמְדִים", "רוֹכְבִים"],
+    ["רוֹקֶדֶת", "קוֹפֶצֶת", "אוֹכֶלֶת", "כּוֹתֶבֶת", "הוֹלֶכֶת", "יוֹשֶׁבֶת", "לוֹמֶדֶת"],
+    ["רוֹקֵד", "קוֹפֵץ", "אוֹכֵל", "כּוֹתֵב", "הוֹלֵךְ", "יוֹשֵׁב", "לוֹמֵד"],
+    ["בַּלּוֹן", "שָׁעוֹן", "לִימוֹן", "חַלּוֹן", "עִתּוֹן", "אָרוֹן"],
+    ["דָּגִים", "סוּסִים", "פִּילִים", "עֵצִים", "גַּנִּים", "שִׁירִים"],
+    ["סִירוֹת", "עוּגוֹת", "פָּרוֹת", "מִטּוֹת", "בָּנָנוֹת", "שִׁירוֹת"],
+  ];
+
+  // One and many: endings ־ים / ־ות.
+  const PLURALS = [
+    { one: "דָּג", many: "דָּגִים", e: "🐟" },
+    { one: "סוּס", many: "סוּסִים", e: "🐴" },
+    { one: "פִּיל", many: "פִּילִים", e: "🐘" },
+    { one: "עֵץ", many: "עֵצִים", e: "🌳" },
+    { one: "בַּלּוֹן", many: "בַּלּוֹנִים", e: "🎈" },
+    { one: "צִפּוֹר", many: "צִפּוֹרִים", e: "🐦" },
+    { one: "כַּדּוּר", many: "כַּדּוּרִים", e: "⚽" },
+    { one: "לִימוֹן", many: "לִימוֹנִים", e: "🍋" },
+    { one: "כֶּלֶב", many: "כְּלָבִים", e: "🐶" },
+    { one: "יֶלֶד", many: "יְלָדִים", e: "👦" },
+    { one: "פֶּרַח", many: "פְּרָחִים", e: "🌸" },
+    { one: "עוּגָה", many: "עוּגוֹת", e: "🎂" },
+    { one: "פָּרָה", many: "פָּרוֹת", e: "🐄" },
+    { one: "סִירָה", many: "סִירוֹת", e: "⛵" },
+    { one: "בָּנָנָה", many: "בָּנָנוֹת", e: "🍌" },
+    { one: "מִטָּה", many: "מִטּוֹת", e: "🛏️" },
+  ];
+
+  // Word families sharing a root.
+  const FAMILIES = [
+    { root: "כתב", words: ["כּוֹתֵב", "מִכְתָּב", "כְּתִיבָה", "כָּתַב"] },
+    { root: "למד", words: ["לוֹמֵד", "תַּלְמִיד", "לִמּוּד", "מְלַמֶּדֶת"] },
+    { root: "אכל", words: ["אוֹכֵל", "אֹכֶל", "מַאֲכָל"] },
+    { root: "שחק", words: ["מְשַׂחֵק", "מִשְׂחָק", "שַׂחְקָן"] },
+    { root: "ספר", words: ["סֵפֶר", "סִפְרִיָּה", "סוֹפֵר", "סִפּוּר"] },
+    { root: "רקד", words: ["רוֹקֵד", "רִקּוּד", "רַקְדָן"] },
+    { root: "גדל", words: ["גָּדוֹל", "מִגְדָּל", "גֹּדֶל"] },
+  ];
+
+  // The same word with prefix letters (ה, ב, ל, ו, מ, ש).
+  const PREFIXES = [
+    { base: "בַּיִת", forms: ["הַבַּיִת", "בַּבַּיִת", "לַבַּיִת", "מֵהַבַּיִת"] },
+    { base: "גַּן", forms: ["הַגַּן", "בַּגַּן", "לַגַּן", "מֵהַגַּן"] },
+    { base: "יֶלֶד", forms: ["הַיֶּלֶד", "לַיֶּלֶד", "וְהַיֶּלֶד", "שֶׁהַיֶּלֶד"] },
+    { base: "כֶּלֶב", forms: ["הַכֶּלֶב", "לַכֶּלֶב", "וְהַכֶּלֶב", "שֶׁהַכֶּלֶב"] },
+    { base: "מַיִם", forms: ["הַמַּיִם", "בַּמַּיִם", "לַמַּיִם", "מֵהַמַּיִם"] },
+    { base: "עֵץ", forms: ["הָעֵץ", "בָּעֵץ", "לָעֵץ", "מֵהָעֵץ"] },
+    { base: "סַל", forms: ["הַסַּל", "בַּסַּל", "לַסַּל", "מֵהַסַּל"] },
+    { base: "שֶׁמֶשׁ", forms: ["הַשֶּׁמֶשׁ", "בַּשֶּׁמֶשׁ", "לַשֶּׁמֶשׁ", "וְהַשֶּׁמֶשׁ"] },
+  ];
+
+  // Question words for the punctuation exercise.
+  const QUESTION_WORDS = { where: "אֵיפֹה", who: "מִי", whether: "הַאִם" };
+
+  // Short, common words a second-grader reads without niqqud.
+  const BARE_WORDS = ["דָּג", "יָד", "סוּס", "פִּיל", "עֵץ", "בַּיִת", "כֶּלֶב", "יֶלֶד", "שֶׁמֶשׁ", "גָּמָל", "נָחָשׁ", "לֶחֶם", "סֵפֶר", "צָב", "קוֹף", "תּוּת", "הַר", "נֵר"];
+
+  const GRADE2 = [
+    { id: "tune", name: "מילים באותה מנגינה" },
+    { id: "plural", name: "אחד והרבה (ים / ות)" },
+    { id: "family", name: "משפחות מילים (שורש)" },
+    { id: "prefix", name: "אותיות שימוש (ה, ב, ל, ו, מ, ש)" },
+    { id: "punct", name: "נקודה וסימן שאלה" },
+    { id: "bare", name: "מילים בלי ניקוד" },
+    { id: "story", name: "קריאת סיפור קצר" },
+  ];
+
+  const stripNiqqud = (s) => s.replace(/[\u0591-\u05C7]/g, "");
 
   // The sticker for each letter is the picture of its first word.
   function stickerFor(ch) {
@@ -501,6 +582,16 @@
     atEndWeWrite: "בְּסוֹף מִלָּה כּוֹתְבִים",
     readSentence: { m: "קְרָא אֶת הַמִּשְׁפָּט, וּבְחַר אֶת הַתְּמוּנָה", f: "קִרְאִי אֶת הַמִּשְׁפָּט, וּבַחֲרִי אֶת הַתְּמוּנָה" },
     inThisPicture: "בַּתְּמוּנָה הַזֹּאת",
+    sameTune: "מִלִּים בְּאוֹתָהּ מַנְגִּינָה!",
+    whichFits: "אֵיזוֹ מִלָּה מַתְאִימָה לַתְּמוּנָה?",
+    lookAgain: { m: "תִּסְתַּכֵּל שׁוּב עַל הַתְּמוּנָה", f: "תִּסְתַּכְּלִי שׁוּב עַל הַתְּמוּנָה" },
+    familyOf: "אֵיזוֹ מִלָּה מֵאוֹתָהּ מִשְׁפָּחָה כְּמוֹ",
+    sameFamily: "מֵאוֹתָהּ מִשְׁפָּחָה",
+    dotOrQuestion: "נְקֻדָּה אוֹ סִימַן שְׁאֵלָה?",
+    isQuestion: "זֹאת שְׁאֵלָה, וּבְסוֹף שְׁאֵלָה יֵשׁ סִימַן שְׁאֵלָה",
+    notQuestion: "זֹאת לֹא שְׁאֵלָה, וּבְסוֹף מִשְׁפָּט כָּזֶה יֵשׁ נְקֻדָּה",
+    readStory: { m: "קְרָא אֶת הַסִּפּוּר, וְעַנֵה עַל הַשְּׁאֵלָה", f: "קִרְאִי אֶת הַסִּפּוּר, וַעֲנִי עַל הַשְּׁאֵלָה" },
+    readStoryAgain: { m: "קְרָא שׁוּב אֶת הַסִּפּוּר", f: "קִרְאִי שׁוּב אֶת הַסִּפּוּר" },
     noStickersYet: "הַמַּדְבֵּקוֹת יַגִּיעוּ כְּשֶׁתִּלְמְדוּ אוֹתִיּוֹת",
   };
 
@@ -518,6 +609,14 @@
     DAGESH_PAIRS,
     dageshForms,
     EHEVI_PAIRS,
+    TUNES,
+    PLURALS,
+    FAMILIES,
+    PREFIXES,
+    QUESTION_WORDS,
+    BARE_WORDS,
+    GRADE2,
+    stripNiqqud,
     SUBJECTS,
     PLACES,
     syllableSpoken,

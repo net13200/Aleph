@@ -47,6 +47,7 @@
       return { key: "part." + text, text };
     },
     word: (w) => ({ key: "word." + w.w, text: w.w }),
+    text: (t) => ({ key: "word." + t, text: t }),
     name: () => ({ key: null, text: (S.profile() || {}).name || "" }),
   };
   function itemSeg(info) {
@@ -308,6 +309,13 @@
       ehevi: eheviTask,
       finalForm: finalFormTask,
       sentence: sentenceTask,
+      tune: tuneTask,
+      plural: pluralTask,
+      family: familyTask,
+      prefix: prefixTask,
+      punct: punctTask,
+      bare: bareTask,
+      story: storyTask,
     }[task.type];
     run(task, info);
   }
@@ -780,6 +788,167 @@
     });
   }
 
+  // ---------- Grade 2, stage 11: words in the same tune ----------
+  // Four words with one pattern. The guide asks for three of them in a row;
+  // finding them quickly is the fluency practice.
+  function tuneTask(task, info) {
+    const words = S.tuneWords(session.p, info.idx);
+    const targets = words.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+    const v = sessionShell(
+      `<div class="ear-guide">${GUIDE}</div>
+       <div class="choices words4">${words.map((w) => `<button class="card" data-v="${esc(w)}"><span>${w}</span></button>`).join("")}</div>`,
+      "hear-stage tune-stage"
+    );
+    let round = 0;
+    let missesThisRound = 0;
+    let mistakes = 0;
+    let locked = false;
+    const ask = () => talk([seg.p("whereWritten"), seg.text(targets[round])]);
+    v.replay = ask;
+    $$(".card").forEach((btn) =>
+      btn.addEventListener("click", async () => {
+        if (locked || btn.disabled) return;
+        const target = targets[round];
+        locked = true;
+        if (btn.dataset.v === target) {
+          A.sfx.correct();
+          btn.classList.add("right");
+          await wait(600);
+          $$(".card").forEach((b) => (b.classList.remove("right", "wrong", "reveal"), (b.disabled = false)));
+          round++;
+          missesThisRound = 0;
+          if (round === targets.length) {
+            if (!mistakes) await talk([seg.praise()]);
+            finishTask(task, mistakes === 0);
+            return;
+          }
+          locked = false;
+          ask();
+          return;
+        }
+        mistakes++;
+        missesThisRound++;
+        A.sfx.soft();
+        btn.classList.add("wrong");
+        btn.disabled = true;
+        if (missesThisRound === 1) {
+          await talk([seg.p("hereItSays"), seg.text(btn.dataset.v), seg.p("whereWritten"), seg.text(target)]);
+        } else {
+          $$(".card").forEach((b) => b.dataset.v === target && b.classList.add("reveal"));
+          await talk([seg.p("hereItSays"), seg.text(target)]);
+        }
+        locked = false;
+      })
+    );
+    talk([seg.p("sameTune")]).then(() => $(".tune-stage") && ask());
+  }
+
+  // ---------- Grade 2, stage 11: one or many (endings) ----------
+  function pluralTask(task, info) {
+    const x = D.PLURALS[info.idx];
+    const many = Math.random() < 0.5;
+    const pics = many ? `<span>${x.e}</span><span>${x.e}</span><span>${x.e}</span>` : `<span>${x.e}</span>`;
+    choiceTask(task, {
+      stageClass: "word-stage",
+      choicesClass: "words2",
+      visual: `<div class="picture"><div class="pic count ${many ? "many" : ""}">${pics}</div></div>`,
+      choices: [x.one, x.many].sort(() => Math.random() - 0.5),
+      answer: many ? x.many : x.one,
+      prompt: [seg.p("whichFits")],
+      onWrong1: (val) => [seg.p("hereItSays"), seg.text(val), seg.p("lookAgain")],
+      onReveal: () => [seg.p("written"), seg.text(many ? x.many : x.one)],
+      afterRight: () => talk([seg.text(many ? x.many : x.one)]),
+    });
+  }
+
+  // ---------- Grade 2, stage 11: word families (roots) ----------
+  function familyTask(task, info) {
+    const t = S.familyTask(session.p, info.idx);
+    choiceTask(task, {
+      stageClass: "word-stage",
+      choicesClass: "words3",
+      visual: `<div class="big-word">${t.word}</div>`,
+      choices: t.choices,
+      answer: t.answer,
+      prompt: [seg.p("familyOf"), seg.text(t.word)],
+      onWrong1: (val) => [seg.p("hereItSays"), seg.text(val), seg.p("familyOf"), seg.text(t.word)],
+      onReveal: () => [seg.text(t.word), seg.p("andAlso"), seg.text(t.answer), seg.p("sameFamily")],
+      afterRight: () => talk([seg.text(t.word), seg.p("andAlso"), seg.text(t.answer), seg.p("sameFamily")]),
+    });
+  }
+
+  // ---------- Grade 2, stage 11: prefix letters ----------
+  function prefixTask(task, info) {
+    const t = S.prefixTask(session.p, info.idx);
+    choiceTask(task, {
+      stageClass: "hear-stage similar words",
+      choicesClass: "words3",
+      visual: `<div class="ear-guide">${GUIDE}</div>`,
+      choices: t.choices,
+      answer: t.target,
+      prompt: [seg.p("whereWritten"), seg.text(t.target)],
+      onWrong1: (val) => [seg.p("hereItSays"), seg.text(val), seg.p("whereWritten"), seg.text(t.target)],
+      onReveal: () => [seg.p("hereItSays"), seg.text(t.target)],
+    });
+  }
+
+  // ---------- Grade 2, stage 12: period or question mark ----------
+  function punctTask(task) {
+    const t = S.punctTask(session.p);
+    const mark = t.question ? "?" : ".";
+    choiceTask(task, {
+      stageClass: "word-stage",
+      choicesClass: "marks",
+      visual: `<div class="big-word sentence parts"><span>${t.text}</span><span class="blank">&nbsp;</span></div>`,
+      choices: [".", "?"].map((m) => ({ v: m, label: m })),
+      answer: mark,
+      prompt: [seg.p("dotOrQuestion")],
+      onWrong1: () => [seg.p(t.question ? "isQuestion" : "notQuestion")],
+      onReveal: () => [seg.p(t.question ? "isQuestion" : "notQuestion")],
+      async afterRight() {
+        const blank = $(".blank");
+        if (blank) {
+          blank.textContent = mark;
+          blank.classList.add("filled");
+        }
+        await talk([seg.sentence(t.text + mark)]);
+      },
+    });
+  }
+
+  // ---------- Grade 2, stage 12: a short word without niqqud ----------
+  function bareTask(task) {
+    const w = pickOne(S.bareWords(session.p));
+    const pics = S.pictureChoices(w);
+    choiceTask(task, {
+      stageClass: "word-stage",
+      choicesClass: "pics",
+      visual: `<div class="big-word">${D.stripNiqqud(w.w)}</div>`,
+      choices: pics.map((x) => ({ v: x.w, label: x.e })),
+      answer: w.w,
+      prompt: [seg.p("wordPic")],
+      onWrong1: (val) => [seg.p("thisIs"), seg.word(D.WORDS.find((x) => x.w === val)), seg.p("wordPic")],
+      onReveal: () => [seg.p("written"), seg.word(w)],
+      afterRight: () => talk([seg.word(w)]),
+    });
+  }
+
+  // ---------- Grade 2, stage 12: read a short story, answer a question ----------
+  function storyTask(task) {
+    const t = S.storyTask(session.p);
+    choiceTask(task, {
+      stageClass: "word-stage story-stage",
+      choicesClass: "pics",
+      visual: `<div class="story"><p>${t.story}</p><p class="question">${t.question}</p></div>`,
+      choices: t.choices.map((pl) => ({ v: pl.w, label: pl.e })),
+      answer: t.answer.w,
+      prompt: [seg.p("readStory")],
+      onWrong1: () => [seg.p("readStoryAgain")],
+      onReveal: () => [seg.sentence(t.story)],
+      afterRight: () => talk([seg.sentence(t.story)]),
+    });
+  }
+
   // ---------- Exercise: tracing ----------
   function traceTask(task, info) {
     const v = sessionShell(`<div class="trace-wrap" id="trace"></div>`, "trace-stage");
@@ -866,7 +1035,7 @@
     const nq = D.NIQQUD.map((n) => {
         const s = S.niqqudStatus(p, n.id);
         const sample = D.syllableText("ב", n.id);
-        const detail = s.status === "off" ? statusLabel.off : `${s.mastered} מתוך ${s.total} צירופים נלמדו`;
+        const detail = s.status === "off" ? statusLabel.off : n.sound ? `${s.mastered} מתוך ${s.total} צירופים נלמדו` : "משמש בקריאת מילים";
         return `<div class="nq-row"><div class="map-cell ${s.status}">${sample}</div><div><b>${n.name}</b><br><span class="muted">${detail}</span></div></div>`;
       })
       .join("");
@@ -914,6 +1083,15 @@
             const detail = st.status === "off" ? statusLabel.off : `${st.mastered} מתוך ${st.total} תרגילים נלמדו`;
             return `<div class="nq-row"><div class="map-cell ${st.status} rule-cell">${r.sample}</div><div><b>${r.name}</b><br><span class="muted">${detail}</span></div></div>`;
           }).join("")}
+          ${
+            p.grade === "ב"
+              ? `<h2>כיתה ב׳</h2>${D.GRADE2.map((g) => {
+                  const st = S.grade2Status(p, g.id);
+                  const detail = st.total ? `${st.mastered} מתוך ${st.total} תרגילים נלמדו` : "עוד אין מספיק מילים שנלמדו";
+                  return `<div class="nq-row"><div class="map-cell ${st.status} dot-cell"></div><div><b>${g.name}</b><br><span class="muted">${detail}</span></div></div>`;
+                }).join("")}`
+              : ""
+          }
         </section>
         <section class="card-box">
           <h2>בלבולים נפוצים</h2>
@@ -1085,6 +1263,10 @@
         b.addEventListener("click", () => {
           $$(id + " button").forEach((x) => x.classList.remove("on"));
           b.classList.add("on");
+          // A second-grader already learned everything in grade 1: mark it all, if nothing is marked yet.
+          if (id === "#grade" && b.dataset.v === "ב" && !$$(".toggle.on").length) {
+            $$(".toggle[data-ch], .toggle[data-nq], .toggle[data-rule]").forEach((t) => (t.classList.add("on"), t.setAttribute("aria-pressed", true)));
+          }
         })
       )
     );
