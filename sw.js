@@ -1,5 +1,5 @@
 /* Offline support: everything the app needs is cached on install. */
-const CACHE = "aleph-v8";
+const CACHE = "aleph-v9";
 const SHELL = [
   "./",
   "index.html",
@@ -15,6 +15,9 @@ const SHELL = [
   "icons/icon-192.png",
   "icons/icon-512.png",
   "icons/apple-touch-icon.png",
+  "icons/icon-maskable-192.png",
+  "icons/icon-maskable-512.png",
+  "icons/favicon-32.png",
   "fonts/noto-sans-hebrew-hebrew.woff2",
   "fonts/noto-sans-hebrew-latin.woff2",
   "fonts/baloo2-sugigames.woff2",
