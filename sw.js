@@ -1,10 +1,11 @@
 /* Offline support: everything the app needs is cached on install. */
-const CACHE = "aleph-v4";
+const CACHE = "aleph-v5";
 const SHELL = [
   "./",
   "index.html",
   "css/app.css",
   "js/data.js",
+  "js/speech.js",
   "js/audio.js",
   "js/store.js",
   "js/trace.js",
@@ -19,6 +20,7 @@ const SHELL = [
   "fonts/noto-sans-hebrew-latin.woff2",
   "fonts/baloo2-sugigames.woff2",
   "audio/manifest.json",
+  "audio/voice-status.json",
 ];
 
 self.addEventListener("install", (e) => {

@@ -20,35 +20,14 @@
     const p = S.profile();
     return p && p.gender === "f" ? "f" : "m";
   }
-  const seg = {
-    p(name) {
-      const v = D.PHRASES[name];
-      if (typeof v === "string") return { key: "p." + name, text: v };
-      const g = gender();
-      return { key: `p.${name}.${g}`, text: v[g] };
-    },
-    praise() {
-      const i = Math.floor(Math.random() * D.PHRASES.praise.length);
-      return { key: "p.praise." + i, text: D.PHRASES.praise[i] };
-    },
-    letter: (ch) => ({ key: "letter." + ch, text: D.LETTER[ch].name }),
-    syl: (ch, sound) => ({ key: `syl.${ch}.${sound}`, text: D.syllableSpoken(ch, sound) }),
-    nq: (id) => ({ key: "nq." + id, text: D.NQ[id].name }),
-    sylSoft: (ch, nq) => ({ key: `sylsoft.${ch}.${D.NQ[nq].sound}`, text: D.dageshForms(ch, nq).soft.spoken }),
-    sentence: (text) => ({ key: "sentence." + text, text }),
+  const SP = Aleph.speech;
+  const seg = Object.assign({}, SP, {
+    p: (name) => SP.phrase(name, gender()),
+    praise: () => SP.praise(Math.floor(Math.random() * D.PHRASES.praise.length)),
     // A letter as shown (maybe with dagesh or a sin dot) is named by its base letter.
-    shown: (text) => seg.letter([...text][0]),
-    // Any written syllable: a plain letter+vowel uses its syllable recording.
-    part(text) {
-      const p = D.parseWord(text);
-      if (p.letters.length === 1 && p.niqqud.length === 1 && D.syllableText(p.letters[0], p.niqqud[0]) === text) {
-        return seg.syl(p.letters[0], D.NQ[p.niqqud[0]].sound);
-      }
-      return { key: "part." + text, text };
-    },
-    word: (w) => ({ key: "word." + w.w, text: w.w }),
+    shown: (text) => SP.letter([...text][0]),
     name: () => ({ key: null, text: (S.profile() || {}).name || "" }),
-  };
+  });
   function itemSeg(info) {
     return info.kind === "S" ? seg.syl(info.ch, info.sound) : seg.letter(info.ch);
   }
@@ -91,6 +70,7 @@
     home: `<svg viewBox="0 0 24 24"><path d="M3 11.5L12 4l9 7.5M5.5 9.8V20h13V9.8" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
     lock: `<svg viewBox="0 0 24 24"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="currentColor"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5" fill="none" stroke="currentColor" stroke-width="2.2"/></svg>`,
     book: `<svg viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z" fill="currentColor"/><path d="M4 20.5A2.5 2.5 0 0 1 6.5 18H20v3H6.5A2.5 2.5 0 0 1 4 20.5z" fill="currentColor" opacity=".55"/><path d="M12 7.2l1.2 2.4 2.6.4-1.9 1.8.5 2.6-2.4-1.3-2.4 1.3.5-2.6-1.9-1.8 2.6-.4z" fill="#fff"/></svg>`,
+    mic: `<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" fill="currentColor"/><path d="M6 11a6 6 0 0 0 12 0M12 17v4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>`,
     pencil: `<svg viewBox="0 0 24 24"><path d="M4 20l1-4L16 5l3 3L8 19z" fill="currentColor"/></svg>`,
   };
 
@@ -725,7 +705,7 @@
   function eheviTask(task, info) {
     const [a, b] = info.pair;
     const target = pickOne([a, b]);
-    const ws = (w) => ({ key: "word." + w, text: w });
+    const ws = (w) => seg.word(w);
     choiceTask(task, {
       stageClass: "hear-stage similar words",
       visual: `<div class="ear-guide">${GUIDE}</div>`,
@@ -968,47 +948,77 @@
     });
   }
 
-  function voiceCheck() {
-    const rows = [];
-    D.LETTERS.forEach((l) => rows.push({ label: `${l.ch} — ${l.name}`, segs: [seg.letter(l.ch)] }));
-    D.NIQQUD.forEach((n) => rows.push({ label: `${D.syllableText("ב", n.id)} — ${n.name}`, segs: [seg.nq(n.id)] }));
-    // One row per sound; marks that sound the same share a recording.
-    const sounds = [];
-    D.NIQQUD.forEach((n) => !sounds.some((x) => x.sound === n.sound) && sounds.push(n));
-    sounds.forEach((n) =>
-      D.LETTERS.filter((l) => D.syllableAllowed(l.ch, n.id)).forEach((l) => {
-        const same = D.NIQQUD.filter((m) => m.sound === n.sound && D.syllableAllowed(l.ch, m.id)).map((m) => D.syllableText(l.ch, m.id));
-        rows.push({ label: same.join(" / "), segs: [seg.syl(l.ch, n.sound)] });
-      })
-    );
-    D.WORDS.forEach((w) => rows.push({ label: `${w.e} ${w.w}`, segs: [seg.word(w)] }));
-    Object.keys(D.DAGESH_PAIRS).forEach((ch) =>
-      D.NIQQUD.forEach((n) => {
-        if (!D.syllableAllowed(ch, n.id) || D.NIQQUD.find((m) => m.sound === n.sound) !== n) return;
-        rows.push({ label: D.dageshForms(ch, n.id).soft.text, segs: [seg.sylSoft(ch, n.id)] });
-      })
-    );
-    D.EHEVI_PAIRS.flat().forEach((w) => rows.push({ label: w, segs: [{ key: "word." + w, text: w }] }));
-    D.SUBJECTS.forEach((s) => D.PLACES.forEach((pl) => rows.push({ label: `${s.e}${pl.e} ${s.w} ${pl.w}`, segs: [seg.sentence(s.w + " " + pl.w)] })));
-    const parts = new Set();
-    D.WORDS.forEach((w) => w.parsed.ok && w.parsed.syllables.forEach((x) => parts.add(x)));
-    [...parts].map((x) => seg.part(x)).filter((g) => g.key.startsWith("part.")).forEach((g) => rows.push({ label: g.text, segs: [g] }));
-    Object.keys(D.PHRASES).forEach((k) => {
-      const v = D.PHRASES[k];
-      if (Array.isArray(v)) v.forEach((t, i) => rows.push({ label: t, segs: [{ key: `p.${k}.${i}`, text: t }] }));
-      else if (typeof v === "string") rows.push({ label: v, segs: [{ key: "p." + k, text: v }] });
-      else ["m", "f"].forEach((g) => rows.push({ label: v[g], segs: [{ key: `p.${k}.${g}`, text: v[g] }] }));
-    });
+  // Lists everything the child can hear. Items the recording checks couldn't
+  // confirm come first; the parent listens and can record their own voice.
+  function voiceCheck(filter) {
+    const all = SP.all();
+    const status = (key) => (A.source(key) === "own" ? null : A.checkStatus(key) || (A.source(key) === "device" ? "device" : null));
+    const toCheck = all.filter((x) => status(x.key) && status(x.key) !== "device");
+    filter = filter || (toCheck.length ? "check" : "all");
+    const rank = { fail: 0, listen: 1, device: 2 };
+    const rows = (filter === "check" ? toCheck : all).slice().sort((a, b) => (rank[status(a.key)] ?? 3) - (rank[status(b.key)] ?? 3));
+    const badge = (key) => {
+      if (A.source(key) === "own") return `<span class="badge own">הקול שלך</span>`;
+      const st = status(key);
+      if (st === "fail") return `<span class="badge fail">צריך הקלטה</span>`;
+      if (st === "listen") return `<span class="badge listen">להאזנה</span>`;
+      if (st === "device") return `<span class="badge">קול המכשיר</span>`;
+      return "";
+    };
+    const canRec = A.canRecord();
     show(
       `<div class="parent-page">
         <div class="dash-head"><h1>בדיקת קול</h1><button class="btn small" id="back">חזרה</button></div>
-        <p class="muted">לחצו על שורה כדי לשמוע. מערכות קול בעברית לא תמיד קוראות ניקוד נכון — אם משהו נשמע שגוי, זה המקום לגלות זאת.</p>
-        <div class="voice-list">${rows.map((r, i) => `<button class="voice-row" data-i="${i}">${ICON.speaker}<span>${r.label}</span></button>`).join("")}</div>
+        <p class="muted">כל מה שהילד שומע מוקלט מראש ונבדק אוטומטית. <b>להאזנה</b> — קטעים קצרים (צירופים, הברות) שמכונה לא יכולה לבדוק: כדאי להאזין להם. <b>צריך הקלטה</b> — נכשלו בבדיקה האוטומטית.${canRec ? " אם משהו נשמע לא נכון, אפשר להקליט אותו בקול שלכם (🎙️) — ההקלטה נשמרת רק במכשיר הזה." : ""}</p>
+        <div class="seg-ctl" id="filter">
+          <button type="button" data-v="check" class="${filter === "check" ? "on" : ""}">לבדיקה (${toCheck.length})</button>
+          <button type="button" data-v="all" class="${filter === "all" ? "on" : ""}">הכול (${all.length})</button>
+        </div>
+        <div class="voice-list">${rows
+          .map(
+            (r, i) => `<div class="voice-row" data-i="${i}">
+              <button class="play">${ICON.speaker}<span>${r.label}</span></button>${badge(r.key)}
+              ${canRec ? `<button class="mini rec" aria-label="הקלטה">${ICON.mic}</button>` : ""}
+              ${A.source(r.key) === "own" ? `<button class="mini del" aria-label="מחיקת ההקלטה שלי">${ICON.close}</button>` : ""}
+            </div>`
+          )
+          .join("")}</div>
       </div>`,
       "parent"
     );
     on("#back", "click", parentHome);
-    $$(".voice-row").forEach((b) => b.addEventListener("click", () => A.say(rows[+b.dataset.i].segs)));
+    $$("#filter button").forEach((b) => b.addEventListener("click", () => voiceCheck(b.dataset.v)));
+    let recording = null;
+    $$(".voice-row").forEach((row) => {
+      const r = rows[+row.dataset.i];
+      row.querySelector(".play").addEventListener("click", () => A.say([r]));
+      const rec = row.querySelector(".rec");
+      rec &&
+        rec.addEventListener("click", async () => {
+          if (recording && recording.row !== row) return;
+          if (!recording) {
+            A.stop();
+            try {
+              recording = { row, ctl: await A.record() };
+              rec.classList.add("on");
+            } catch (_) {
+              alert("אין גישה למיקרופון.");
+            }
+            return;
+          }
+          const blob = await recording.ctl.stop();
+          recording = null;
+          await A.saveOwn(r.key, blob);
+          await A.say([r]);
+          voiceCheck(filter);
+        });
+      const del = row.querySelector(".del");
+      del &&
+        del.addEventListener("click", async () => {
+          await A.deleteOwn(r.key);
+          voiceCheck(filter);
+        });
+    });
   }
 
   // ---------- Profile form ----------

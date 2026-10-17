@@ -592,8 +592,17 @@ input[type="text"]:focus { outline: none; border-color: var(--leaf); }
 .rate-row input { flex: 1; accent-color: var(--leaf); }
 
 .voice-list { display: flex; flex-direction: column; gap: 6px; }
-.voice-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--card); border-radius: 12px; text-align: right; font-size: 1.05rem; }
-.voice-row svg { width: 20px; height: 20px; color: var(--leaf); flex: none; }
+.voice-list { margin-top: 12px; }
+.voice-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 6px; background: var(--card); border-radius: 12px; }
+.voice-row .play { flex: 1; display: flex; align-items: center; gap: 10px; padding: 6px 4px; text-align: right; font-size: 1.05rem; min-width: 0; }
+.voice-row .play svg { width: 20px; height: 20px; color: var(--leaf); flex: none; }
+.voice-row .mini { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: #f4efe6; color: var(--muted); flex: none; }
+.voice-row .mini svg { width: 18px; height: 18px; }
+.voice-row .rec.on { background: #e5484d; color: #fff; animation: glow 0.8s ease-in-out infinite alternate; }
+.badge { font-size: 0.75rem; padding: 3px 8px; border-radius: 999px; background: #f1ede6; color: var(--muted); white-space: nowrap; flex: none; }
+.badge.listen { background: var(--amber-soft); color: #9a5b00; }
+.badge.fail { background: #fde4e4; color: #b3261e; }
+.badge.own { background: var(--leaf-soft); color: #1e7a45; }
 
 /* ---------- Parent gate ---------- */
 

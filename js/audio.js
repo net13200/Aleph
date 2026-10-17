@@ -1,9 +1,9 @@
 /* Audio for Aleph.
  *
- * Every spoken segment is { key, text }. If audio/manifest.json lists the key,
- * the pre-recorded (checked) file is played; otherwise the device's Hebrew
- * voice reads `text`. Hebrew TTS often ignores niqqud, so the recordings are
- * the intended long-term source — the device voice is a working fallback.
+ * Every spoken segment is { key, text }. What plays, in order of preference:
+ *   1. the parent's own recording of that item (kept in IndexedDB on the device),
+ *   2. the checked recording listed in audio/manifest.json (tools/voice/),
+ *   3. the device's Hebrew voice reading `text` (it often ignores niqqud).
  * Sound effects are synthesized with WebAudio so nothing needs downloading. */
 (() => {
   "use strict";
@@ -11,6 +11,8 @@
   const Aleph = (window.Aleph = window.Aleph || {});
 
   let manifest = {};
+  let status = {}; // key → "listen" | "fail", from the recording checks
+  let own = new Set(); // keys the parent recorded
   let rate = 0.85;
   let voice = null;
   let ctx = null;
@@ -38,6 +40,62 @@
     } catch (_) {
       manifest = {};
     }
+    try {
+      const res = await fetch("audio/voice-status.json", { cache: "no-cache" });
+      if (res.ok) status = await res.json();
+    } catch (_) {
+      status = {};
+    }
+    try {
+      own = new Set(await ownKeys());
+    } catch (_) {
+      own = new Set();
+    }
+  }
+
+  // ---------- The parent's own recordings (IndexedDB, this device only) ----------
+  function db() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open("aleph-voice", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("rec");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function tx(mode, fn) {
+    const d = await db();
+    return new Promise((resolve, reject) => {
+      const t = d.transaction("rec", mode);
+      const req = fn(t.objectStore("rec"));
+      t.oncomplete = () => resolve(req && req.result);
+      t.onerror = () => reject(t.error);
+    });
+  }
+  const ownKeys = () => tx("readonly", (st) => st.getAllKeys());
+  const ownGet = (key) => tx("readonly", (st) => st.get(key));
+  async function ownSave(key, blob) {
+    await tx("readwrite", (st) => st.put(blob, key));
+    own.add(key);
+  }
+  async function ownDelete(key) {
+    await tx("readwrite", (st) => st.delete(key));
+    own.delete(key);
+  }
+
+  // Records from the microphone until stop() is called on the result.
+  async function record() {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const rec = new MediaRecorder(stream);
+    const chunks = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise((resolve) => {
+      rec.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        resolve(new Blob(chunks, { type: rec.mimeType || "audio/mp4" }));
+      };
+    });
+    rec.start();
+    return { stop: () => (rec.stop(), done) };
   }
 
   function playFile(src) {
@@ -97,9 +155,21 @@
     for (const seg of segments) {
       if (myToken !== token) return;
       if (!seg || !seg.text) continue;
+      if (seg.key && own.has(seg.key)) {
+        const blob = await ownGet(seg.key).catch(() => null);
+        if (blob) {
+          const url = URL.createObjectURL(blob);
+          await playFile(url);
+          URL.revokeObjectURL(url);
+          continue;
+        }
+      }
       const file = seg.key && manifest[seg.key];
-      if (file) await playFile("audio/" + file);
-      else await speakText(seg.text);
+      if (file) {
+        await playFile("audio/" + file);
+        // Recordings are trimmed tight; leave a breath between segments.
+        if (myToken === token) await new Promise((r) => setTimeout(r, 110));
+      } else await speakText(seg.text);
     }
   }
 
@@ -178,5 +248,14 @@
     recordedCount() {
       return Object.keys(manifest).length;
     },
+    // For the parent's voice check.
+    source(key) {
+      return own.has(key) ? "own" : manifest[key] ? "file" : "device";
+    },
+    checkStatus: (key) => status[key] || null,
+    record,
+    saveOwn: ownSave,
+    deleteOwn: ownDelete,
+    canRecord: () => !!(navigator.mediaDevices && window.MediaRecorder),
   };
 })();
